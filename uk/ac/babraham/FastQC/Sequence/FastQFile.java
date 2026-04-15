@@ -35,6 +35,8 @@ import uk.ac.babraham.FastQC.Utilities.MultiMemberGZIPInputStream;
 
 public class FastQFile implements SequenceFile {
 
+	private static final Pattern COLORSPACE_PATTERN = Pattern.compile("^[GATCNgatcn][\\.0123456]+$");
+
 	private Sequence nextSequence = null;
 	private File file;
 	private long fileSize = 0;
@@ -194,11 +196,12 @@ public class FastQFile implements SequenceFile {
 				checkColorspace(seq);
 			}
 
+			String upperSeq = seq.toUpperCase();
 			if (isColorspace()) {
-				nextSequence = new Sequence(this,convertColorspaceToBases(seq.toUpperCase()), seq.toUpperCase(), quality, id);
-			} 
+				nextSequence = new Sequence(this,convertColorspaceToBases(upperSeq), upperSeq, quality, id);
+			}
 			else {
-				nextSequence = new Sequence(this, seq.toUpperCase(),quality, id);
+				nextSequence = new Sequence(this, upperSeq, quality, id);
 			}
 
 			// If we're running in --casava mode then we will flag any sequences which
@@ -226,14 +229,7 @@ public class FastQFile implements SequenceFile {
 		// Some basecalled files can be all dots, which leads to them
 		// being identified as colorspace data. This check should find
 		// only true colorspace files.
-		String regex = "^[GATCNgatcn][\\.0123456]+$";
-		Pattern pattern = Pattern.compile(regex);
-		Matcher matcher = pattern.matcher(seq);
-		if (matcher.find()) {
-			isColorspace = true;
-		} else {
-			isColorspace = false;
-		}
+		isColorspace = COLORSPACE_PATTERN.matcher(seq).find();
 	}
 
 	private String convertColorspaceToBases(String s) {
