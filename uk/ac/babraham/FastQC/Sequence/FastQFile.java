@@ -19,13 +19,10 @@
  */
 package uk.ac.babraham.FastQC.Sequence;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.itadaki.bzip2.BZip2InputStream;
@@ -37,13 +34,6 @@ public class FastQFile implements SequenceFile {
 
 	private static final Pattern COLORSPACE_PATTERN = Pattern.compile("^[GATCNgatcn][\\.0123456]+$");
 
-	// Lookup table for fast uppercase conversion (avoids String.toUpperCase() allocation)
-	private static final char[] UPPER = new char[128];
-	static {
-		for (int i = 0; i < 128; i++) UPPER[i] = (char) i;
-		for (char c = 'a'; c <= 'z'; c++) UPPER[c] = (char) (c - 32);
-	}
-
 	private Sequence nextSequence = null;
 	private File file;
 	private long fileSize = 0;
@@ -51,8 +41,9 @@ public class FastQFile implements SequenceFile {
 	private boolean casavaMode = false;
 	private boolean nofilter = false;
 
-	// We actually read our final data from this buffered reader
-	private BufferedReader br;
+	// Byte-based line reader — bypasses BufferedReader/InputStreamReader
+	// for zero-copy ASCII parsing without UTF-8 decoding overhead
+	private ByteLineReader blr;
 	// We'll keep count of the number of lines read for the error message
 	private long lineNumber = 0;
 
@@ -86,20 +77,19 @@ public class FastQFile implements SequenceFile {
 			fis = new FileInputStream(file);
 		}
 				
-		int readerBufSize = 128 * 1024;
 		int gzipBufSize = 64 * 1024;
 
 		if (file.getName().startsWith("stdin")) {
-			br = new BufferedReader(new InputStreamReader(System.in), readerBufSize);
+			blr = new ByteLineReader(System.in);
 		}
 		else if (file.getName().toLowerCase().endsWith(".gz") || (Files.probeContentType(file.toPath()) != null && (Files.probeContentType(file.toPath()).equals("application/x-gzip") || Files.probeContentType(file.toPath()).equals("application/gzip")))) {
-			br = new BufferedReader(new InputStreamReader(new MultiMemberGZIPInputStream(fis, gzipBufSize)), readerBufSize);
+			blr = new ByteLineReader(new MultiMemberGZIPInputStream(fis, gzipBufSize));
 		}
 		else if (file.getName().toLowerCase().endsWith(".bz2")) {
-			br = new BufferedReader(new InputStreamReader(new BZip2InputStream(fis,false)), readerBufSize);
+			blr = new ByteLineReader(new BZip2InputStream(fis,false));
 		}
 		else {
-			br = new BufferedReader(new InputStreamReader(fis), readerBufSize);
+			blr = new ByteLineReader(fis);
 		}
 		readNext();
 	}
@@ -143,19 +133,15 @@ public class FastQFile implements SequenceFile {
 
 	private void readNext() throws SequenceFormatException {
 		try {
-			// First line should be the id
-
-			// We might have blank lines between entries or at the end
-			// so allow for this
 			String id;
 
 			while (true) {
-				id = br.readLine();
+				id = blr.readLine();
 				++lineNumber;
 
 				if (id == null) {
 					nextSequence = null;
-					br.close();
+					blr.close();
 					if (fis != null) {
 						fis.close();
 					}
@@ -175,22 +161,17 @@ public class FastQFile implements SequenceFile {
 			}
 
 			String seq;
-			String midLine;
 			String quality;
 			try {
-				// Then the sequence
-				seq = br.readLine();
+				// Sequence line — uppercase in the byte buffer (no extra String alloc)
+				seq = blr.readLineUpperCase();
 				if (seq == null) throw new IOException("No more data, expected sequence, at line "+lineNumber);
 				++lineNumber;
-				// Then another id which we don't need
-				midLine = br.readLine();
-				if (midLine == null) throw new IOException("No more data, expected midline, at line "+lineNumber);
+				// Mid-line ('+') — skip without creating a String
+				if (!blr.skipLine()) throw new IOException("No more data, expected midline, at line "+lineNumber);
 				++lineNumber;
-				if (!midLine.startsWith("+")) {
-					throw new SequenceFormatException("Midline '"+midLine+"' didn't start with '+' at "+lineNumber);
-				}
-				// Then the quality string
-				quality = br.readLine();
+				// Quality string
+				quality = blr.readLine();
 				if (quality == null) throw new IOException("No more data, expected quality, at line "+lineNumber);
 				++lineNumber;
 			}
@@ -202,16 +183,16 @@ public class FastQFile implements SequenceFile {
 			// We only check for colourspace on the first entry.  After that we assume
 			// the rest of the file is the same.  For the first entry the nextSequence
 			// will be null, but we'll have real data in seq
+			// seq is already uppercase from readLineUpperCase()
 			if (nextSequence == null && seq != null) {
 				checkColorspace(seq);
 			}
 
-			String upperSeq = fastUpperCase(seq);
 			if (isColorspace()) {
-				nextSequence = new Sequence(this,convertColorspaceToBases(upperSeq), upperSeq, quality, id);
+				nextSequence = new Sequence(this, convertColorspaceToBases(seq), seq, quality, id);
 			}
 			else {
-				nextSequence = new Sequence(this, upperSeq, quality, id);
+				nextSequence = new Sequence(this, seq, quality, id);
 			}
 
 			// If we're running in --casava mode then we will flag any sequences which
@@ -358,22 +339,6 @@ public class FastQFile implements SequenceFile {
 
 	public File getFile() {
 		return file;
-	}
-
-	/**
-	 * Fast uppercase conversion using a lookup table.
-	 * Avoids String.toUpperCase() which allocates a new String via
-	 * Character.toUpperCase() for each char. This version works directly
-	 * on ASCII characters which is safe for DNA sequences (A-Z, a-z).
-	 */
-	private static String fastUpperCase(String s) {
-		int len = s.length();
-		char[] chars = new char[len];
-		for (int i = 0; i < len; i++) {
-			char c = s.charAt(i);
-			chars[i] = (c < 128) ? UPPER[c] : c;
-		}
-		return new String(chars);
 	}
 
 }

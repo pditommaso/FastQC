@@ -22,6 +22,7 @@ package uk.ac.babraham.FastQC.Analysis;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CountDownLatch;
 
 import uk.ac.babraham.FastQC.Modules.BasicStats;
 import uk.ac.babraham.FastQC.Modules.QCModule;
@@ -36,10 +37,10 @@ public class AnalysisRunner implements Runnable {
 	private List<AnalysisListener> listeners = new ArrayList<AnalysisListener>();
 	private int percentComplete = 0;
 
-	// Batch size for queue transfer — larger batches reduce lock contention
 	private static final int BATCH_SIZE = 1024;
-	// Number of batches buffered between reader and processor
 	private static final int QUEUE_CAPACITY = 32;
+	// Number of parallel module processing threads
+	private static final int NUM_PROCESSORS = 2;
 
 	public AnalysisRunner (SequenceFile file) {
 		this.file = file;
@@ -72,13 +73,32 @@ public class AnalysisRunner implements Runnable {
 			listeners.get(li).analysisStarted(file);
 		}
 
-		// Parallel pipeline: reader thread decompresses + parses into batches,
-		// this thread processes batches through modules. Batching reduces
-		// queue lock contention vs per-sequence queueing.
-		ArrayBlockingQueue<Sequence[]> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+		// Three-stage parallel pipeline:
+		// 1. Reader thread: decompress + parse FASTQ into batched queue
+		// 2. N processor threads: each handles a subset of modules
+		// This uses 1+N CPU cores for overlapped I/O and computation.
+
+		// Create N queues, one per processor thread. The dispatcher
+		// copies each batch reference to all processor queues.
+		@SuppressWarnings("unchecked")
+		ArrayBlockingQueue<Sequence[]>[] procQueues = new ArrayBlockingQueue[NUM_PROCESSORS];
+		for (int i = 0; i < NUM_PROCESSORS; i++) {
+			procQueues[i] = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+		}
 		final Sequence[] POISON = new Sequence[0];
 		final SequenceFormatException[] readerError = { null };
 
+		// Split modules across processors
+		QCModule[][] moduleSplits = new QCModule[NUM_PROCESSORS][];
+		int splitSize = (modules.length + NUM_PROCESSORS - 1) / NUM_PROCESSORS;
+		for (int p = 0; p < NUM_PROCESSORS; p++) {
+			int from = p * splitSize;
+			int to = Math.min(from + splitSize, modules.length);
+			moduleSplits[p] = new QCModule[to - from];
+			System.arraycopy(modules, from, moduleSplits[p], 0, to - from);
+		}
+
+		// Reader thread
 		Thread reader = new Thread(() -> {
 			try {
 				Sequence[] batch = new Sequence[BATCH_SIZE];
@@ -86,66 +106,79 @@ public class AnalysisRunner implements Runnable {
 				while (file.hasNext()) {
 					batch[idx++] = file.next();
 					if (idx == BATCH_SIZE) {
-						queue.put(batch);
+						for (int p = 0; p < NUM_PROCESSORS; p++) {
+							procQueues[p].put(batch);
+						}
 						batch = new Sequence[BATCH_SIZE];
 						idx = 0;
 					}
 				}
-				// Flush remaining sequences as a partial batch
 				if (idx > 0) {
 					Sequence[] partial = new Sequence[idx];
 					System.arraycopy(batch, 0, partial, 0, idx);
-					queue.put(partial);
+					for (int p = 0; p < NUM_PROCESSORS; p++) {
+						procQueues[p].put(partial);
+					}
 				}
 			} catch (SequenceFormatException e) {
 				readerError[0] = e;
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
 			}
-			try { queue.put(POISON); } catch (InterruptedException e) {}
+			for (int p = 0; p < NUM_PROCESSORS; p++) {
+				try { procQueues[p].put(POISON); } catch (InterruptedException e) {}
+			}
 		}, "fastqc-reader");
 		reader.setDaemon(true);
 		reader.start();
 
-		int seqCount = 0;
-		try {
-			while (true) {
-				Sequence[] batch = queue.take();
-				if (batch == POISON) break;
+		// Processor threads
+		CountDownLatch processorsDone = new CountDownLatch(NUM_PROCESSORS);
+		int[] seqCounts = new int[NUM_PROCESSORS];
 
-				if (readerError[0] != null) {
-					for (int li = 0; li < listeners.size(); li++) {
-						listeners.get(li).analysisExceptionReceived(file, readerError[0]);
-					}
-					return;
-				}
+		for (int p = 0; p < NUM_PROCESSORS; p++) {
+			final int procId = p;
+			final QCModule[] myModules = moduleSplits[p];
+			final ArrayBlockingQueue<Sequence[]> myQueue = procQueues[p];
 
-				for (int b = 0; b < batch.length; b++) {
-					Sequence seq = batch[b];
-					++seqCount;
+			Thread processor = new Thread(() -> {
+				try {
+					int count = 0;
+					while (true) {
+						Sequence[] batch = myQueue.take();
+						if (batch == POISON) break;
 
-					for (int m = 0; m < modules.length; m++) {
-						if (seq.isFiltered() && modules[m].ignoreFilteredSequences()) continue;
-						modules[m].processSequence(seq);
-					}
-				}
-
-				if (seqCount % 1000 < BATCH_SIZE) {
-					if (file.getPercentComplete() >= percentComplete + 5) {
-						percentComplete = (((int) file.getPercentComplete()) / 5) * 5;
-						for (int li = 0; li < listeners.size(); li++) {
-							listeners.get(li).analysisUpdated(file, seqCount, percentComplete);
+						for (int b = 0; b < batch.length; b++) {
+							Sequence seq = batch[b];
+							count++;
+							for (int m = 0; m < myModules.length; m++) {
+								if (seq.isFiltered() && myModules[m].ignoreFilteredSequences()) continue;
+								myModules[m].processSequence(seq);
+							}
 						}
 					}
+					seqCounts[procId] = count;
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				} finally {
+					processorsDone.countDown();
 				}
-			}
+			}, "fastqc-proc-" + p);
+			processor.setDaemon(true);
+			processor.start();
+		}
+
+		// Wait for all processors
+		try {
+			processorsDone.await();
+			reader.join();
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		}
 
-		try { reader.join(); } catch (InterruptedException e) {}
+		int seqCount = seqCounts[0]; // All processors see the same sequences
 
-		// Check for reader error after stream end
+		// Check for reader error
 		if (readerError[0] != null) {
 			for (int li = 0; li < listeners.size(); li++) {
 				listeners.get(li).analysisExceptionReceived(file, readerError[0]);
@@ -153,14 +186,10 @@ public class AnalysisRunner implements Runnable {
 			return;
 		}
 
-		// We need to account for their potentially being no sequences
-		// in the file.  In this case the BasicStats module never gets
-		// the file name so we need to explicitly pass it.
-
 		if (seqCount == 0) {
-			for (int m=0; m<modules.length; m++) {
+			for (int m = 0; m < modules.length; m++) {
 				if (modules[m] instanceof BasicStats) {
-					((BasicStats)modules[m]).setFileName(file.name());
+					((BasicStats) modules[m]).setFileName(file.name());
 				}
 			}
 		}
