@@ -78,18 +78,22 @@ public class FastQFile implements SequenceFile {
 			fis = new FileInputStream(file);
 		}
 				
+		// Use large buffers for I/O — the default 8KB is far too small for multi-GB files.
+		// 128KB BufferedReader + 64KB inflate buffer significantly reduces syscall overhead.
+		int readerBufSize = 128 * 1024;
+		int gzipBufSize = 64 * 1024;
+
 		if (file.getName().startsWith("stdin")) {
-			br = new BufferedReader(new InputStreamReader(System.in));
+			br = new BufferedReader(new InputStreamReader(System.in), readerBufSize);
 		}
 		else if (file.getName().toLowerCase().endsWith(".gz") || (Files.probeContentType(file.toPath()) != null && (Files.probeContentType(file.toPath()).equals("application/x-gzip") || Files.probeContentType(file.toPath()).equals("application/gzip")))) {
-			br = new BufferedReader(new InputStreamReader(new MultiMemberGZIPInputStream(fis)));
-		} 
+			br = new BufferedReader(new InputStreamReader(new MultiMemberGZIPInputStream(fis, gzipBufSize)), readerBufSize);
+		}
 		else if (file.getName().toLowerCase().endsWith(".bz2")) {
-			br = new BufferedReader(new InputStreamReader(new BZip2InputStream(fis,false)));
-		} 
-
+			br = new BufferedReader(new InputStreamReader(new BZip2InputStream(fis,false)), readerBufSize);
+		}
 		else {
-			br = new BufferedReader(new InputStreamReader(fis));
+			br = new BufferedReader(new InputStreamReader(fis), readerBufSize);
 		}
 		readNext();
 	}
