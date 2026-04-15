@@ -56,18 +56,28 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
 
-      - name: Set up Ant
+      - name: Set up Ant and build tools
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update -q && sudo apt-get install -yq ant
+            sudo apt-get update -q && sudo apt-get install -yq ant cmake
           else
-            brew install ant
+            brew install ant cmake
           fi
 
-      - name: Build native image
+      - name: Build zlib-ng (compat mode)
+        run: |
+          git clone --depth 1 https://github.com/zlib-ng/zlib-ng.git /tmp/zlib-ng
+          cmake -B /tmp/zlib-ng/build -S /tmp/zlib-ng \
+            -DZLIB_COMPAT=ON -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/zlib-ng-compat
+          cmake --build /tmp/zlib-ng/build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          cmake --install /tmp/zlib-ng/build
+
+      - name: Build native image with zlib-ng
         run: |
           export GRAALVM_HOME=$JAVA_HOME
-          ant native-image
+          ant native-image \
+            -Dnative-image.extra-args="-H:NativeLinkerOption=-force_load -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a"
 
       - name: Smoke test
         run: |
