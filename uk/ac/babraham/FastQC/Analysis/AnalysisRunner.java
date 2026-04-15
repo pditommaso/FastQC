@@ -94,14 +94,9 @@ public class AnalysisRunner implements Runnable {
 			
 				percentComplete = (((int)file.getPercentComplete())/5)*5;
 				
-				i = listeners.iterator();
-					while (i.hasNext()) {
-						i.next().analysisUpdated(file,seqCount,percentComplete);
+				for (int li = 0; li < listeners.size(); li++) {
+						listeners.get(li).analysisUpdated(file,seqCount,percentComplete);
 					}
-					try {
-						Thread.sleep(10);
-					} 
-					catch (InterruptedException e) {}
 			}
 			}
 		}
