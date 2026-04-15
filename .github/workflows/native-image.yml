@@ -1,23 +1,47 @@
 name: Native Image Build
 
 on:
-  release:
-    types: [created]
+  push:
+    branches: ['**']
   workflow_dispatch:
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.check.outputs.release }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for release trigger
+        id: check
+        run: |
+          msg=$(git log -1 --pretty=%B)
+          if echo "$msg" | grep -q '\[release\]'; then
+            echo "release=true" >> $GITHUB_OUTPUT
+          else
+            echo "release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract version
+        id: version
+        run: |
+          ver=$(grep 'VERSION\s*=' uk/ac/babraham/FastQC/FastQCApplication.java \
+                | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$ver" >> $GITHUB_OUTPUT
+
   build:
+    needs: check
+    if: needs.check.outputs.release == 'true'
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
-            arch: amd64
             artifact: fastqc-linux-amd64
           - os: ubuntu-24.04-arm
-            arch: arm64
             artifact: fastqc-linux-arm64
           - os: macos-latest
-            arch: arm64
             artifact: fastqc-macos-arm64
 
     runs-on: ${{ matrix.os }}
@@ -48,7 +72,6 @@ jobs:
       - name: Smoke test
         run: |
           ./fastqc --version || true
-          # Run on a minimal synthetic FASTQ
           printf '@read1\nACGT\n+\nIIII\n' > /tmp/test.fastq
           ./fastqc /tmp/test.fastq
           ls -la /tmp/test_fastqc.zip
@@ -62,8 +85,29 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
-      - name: Upload to release
-        if: github.event_name == 'release'
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release and upload binaries
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.artifact }}"
+        run: |
+          version="${{ needs.check.outputs.version }}"
+          tag="v${version}"
+          gh release create "$tag" \
+            --title "FastQC $version" \
+            --generate-notes \
+            artifacts/fastqc-linux-amd64/fastqc-linux-amd64 \
+            artifacts/fastqc-linux-arm64/fastqc-linux-arm64 \
+            artifacts/fastqc-macos-arm64/fastqc-macos-arm64
