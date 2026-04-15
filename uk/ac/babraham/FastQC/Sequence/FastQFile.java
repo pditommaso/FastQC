@@ -37,6 +37,13 @@ public class FastQFile implements SequenceFile {
 
 	private static final Pattern COLORSPACE_PATTERN = Pattern.compile("^[GATCNgatcn][\\.0123456]+$");
 
+	// Lookup table for fast uppercase conversion (avoids String.toUpperCase() allocation)
+	private static final char[] UPPER = new char[128];
+	static {
+		for (int i = 0; i < 128; i++) UPPER[i] = (char) i;
+		for (char c = 'a'; c <= 'z'; c++) UPPER[c] = (char) (c - 32);
+	}
+
 	private Sequence nextSequence = null;
 	private File file;
 	private long fileSize = 0;
@@ -53,6 +60,7 @@ public class FastQFile implements SequenceFile {
 	// the file we've got.  We don't read from this directly, but it's the
 	// only way to access the file pointer.
 	private FileInputStream fis;
+
 
 	private String name;
 	private boolean isColorspace = false;
@@ -78,8 +86,6 @@ public class FastQFile implements SequenceFile {
 			fis = new FileInputStream(file);
 		}
 				
-		// Use large buffers for I/O — the default 8KB is far too small for multi-GB files.
-		// 128KB BufferedReader + 64KB inflate buffer significantly reduces syscall overhead.
 		int readerBufSize = 128 * 1024;
 		int gzipBufSize = 64 * 1024;
 
@@ -200,7 +206,7 @@ public class FastQFile implements SequenceFile {
 				checkColorspace(seq);
 			}
 
-			String upperSeq = seq.toUpperCase();
+			String upperSeq = fastUpperCase(seq);
 			if (isColorspace()) {
 				nextSequence = new Sequence(this,convertColorspaceToBases(upperSeq), upperSeq, quality, id);
 			}
@@ -352,6 +358,22 @@ public class FastQFile implements SequenceFile {
 
 	public File getFile() {
 		return file;
+	}
+
+	/**
+	 * Fast uppercase conversion using a lookup table.
+	 * Avoids String.toUpperCase() which allocates a new String via
+	 * Character.toUpperCase() for each char. This version works directly
+	 * on ASCII characters which is safe for DNA sequences (A-Z, a-z).
+	 */
+	private static String fastUpperCase(String s) {
+		int len = s.length();
+		char[] chars = new char[len];
+		for (int i = 0; i < len; i++) {
+			char c = s.charAt(i);
+			chars[i] = (c < 128) ? UPPER[c] : c;
+		}
+		return new String(chars);
 	}
 
 }

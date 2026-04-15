@@ -20,8 +20,8 @@
 package uk.ac.babraham.FastQC.Analysis;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 
 import uk.ac.babraham.FastQC.Modules.BasicStats;
 import uk.ac.babraham.FastQC.Modules.QCModule;
@@ -35,11 +35,16 @@ public class AnalysisRunner implements Runnable {
 	private QCModule [] modules;
 	private List<AnalysisListener> listeners = new ArrayList<AnalysisListener>();
 	private int percentComplete = 0;
-	
+
+	// Batch size for queue transfer — larger batches reduce lock contention
+	private static final int BATCH_SIZE = 1024;
+	// Number of batches buffered between reader and processor
+	private static final int QUEUE_CAPACITY = 32;
+
 	public AnalysisRunner (SequenceFile file) {
 		this.file = file;
 	}
-	
+
 	public void addAnalysisListener (AnalysisListener l) {
 		if (l != null && !listeners.contains(l)) {
 			listeners.add(l);
@@ -52,7 +57,7 @@ public class AnalysisRunner implements Runnable {
 		}
 	}
 
-	
+
 	public void startAnalysis (QCModule [] modules) {
 		this.modules = modules;
 		for (int i=0;i<modules.length;i++) {
@@ -63,48 +68,95 @@ public class AnalysisRunner implements Runnable {
 
 	public void run() {
 
-		Iterator<AnalysisListener> i = listeners.iterator();
-		while (i.hasNext()) {
-			i.next().analysisStarted(file);
+		for (int li = 0; li < listeners.size(); li++) {
+			listeners.get(li).analysisStarted(file);
 		}
 
-		
-		int seqCount = 0;
-		while (file.hasNext()) {
-			++seqCount;
-			Sequence seq;
+		// Parallel pipeline: reader thread decompresses + parses into batches,
+		// this thread processes batches through modules. Batching reduces
+		// queue lock contention vs per-sequence queueing.
+		ArrayBlockingQueue<Sequence[]> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
+		final Sequence[] POISON = new Sequence[0];
+		final SequenceFormatException[] readerError = { null };
+
+		Thread reader = new Thread(() -> {
 			try {
-				seq = file.next();
-			}
-			catch (SequenceFormatException e) {
-				i = listeners.iterator();
-				while (i.hasNext()) {
-					i.next().analysisExceptionReceived(file,e);
-				}
-				return;
-			}
-			
-			for (int m=0;m<modules.length;m++) {
-				if (seq.isFiltered() && modules[m].ignoreFilteredSequences()) continue;
-				modules[m].processSequence(seq);
-			}
-			
-			if (seqCount % 1000 == 0) {
-			if (file.getPercentComplete() >= percentComplete+5) {
-			
-				percentComplete = (((int)file.getPercentComplete())/5)*5;
-				
-				for (int li = 0; li < listeners.size(); li++) {
-						listeners.get(li).analysisUpdated(file,seqCount,percentComplete);
+				Sequence[] batch = new Sequence[BATCH_SIZE];
+				int idx = 0;
+				while (file.hasNext()) {
+					batch[idx++] = file.next();
+					if (idx == BATCH_SIZE) {
+						queue.put(batch);
+						batch = new Sequence[BATCH_SIZE];
+						idx = 0;
 					}
+				}
+				// Flush remaining sequences as a partial batch
+				if (idx > 0) {
+					Sequence[] partial = new Sequence[idx];
+					System.arraycopy(batch, 0, partial, 0, idx);
+					queue.put(partial);
+				}
+			} catch (SequenceFormatException e) {
+				readerError[0] = e;
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
 			}
+			try { queue.put(POISON); } catch (InterruptedException e) {}
+		}, "fastqc-reader");
+		reader.setDaemon(true);
+		reader.start();
+
+		int seqCount = 0;
+		try {
+			while (true) {
+				Sequence[] batch = queue.take();
+				if (batch == POISON) break;
+
+				if (readerError[0] != null) {
+					for (int li = 0; li < listeners.size(); li++) {
+						listeners.get(li).analysisExceptionReceived(file, readerError[0]);
+					}
+					return;
+				}
+
+				for (int b = 0; b < batch.length; b++) {
+					Sequence seq = batch[b];
+					++seqCount;
+
+					for (int m = 0; m < modules.length; m++) {
+						if (seq.isFiltered() && modules[m].ignoreFilteredSequences()) continue;
+						modules[m].processSequence(seq);
+					}
+				}
+
+				if (seqCount % 1000 < BATCH_SIZE) {
+					if (file.getPercentComplete() >= percentComplete + 5) {
+						percentComplete = (((int) file.getPercentComplete()) / 5) * 5;
+						for (int li = 0; li < listeners.size(); li++) {
+							listeners.get(li).analysisUpdated(file, seqCount, percentComplete);
+						}
+					}
+				}
 			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
 		}
-		
+
+		try { reader.join(); } catch (InterruptedException e) {}
+
+		// Check for reader error after stream end
+		if (readerError[0] != null) {
+			for (int li = 0; li < listeners.size(); li++) {
+				listeners.get(li).analysisExceptionReceived(file, readerError[0]);
+			}
+			return;
+		}
+
 		// We need to account for their potentially being no sequences
-		// in the file.  In this case the BasicStats module never gets 
+		// in the file.  In this case the BasicStats module never gets
 		// the file name so we need to explicitly pass it.
-		
+
 		if (seqCount == 0) {
 			for (int m=0; m<modules.length; m++) {
 				if (modules[m] instanceof BasicStats) {
@@ -112,12 +164,11 @@ public class AnalysisRunner implements Runnable {
 				}
 			}
 		}
-		
-		i = listeners.iterator();
-		while (i.hasNext()) {
-			i.next().analysisComplete(file,modules);
+
+		for (int li = 0; li < listeners.size(); li++) {
+			listeners.get(li).analysisComplete(file, modules);
 		}
 
 	}
-	
+
 }
