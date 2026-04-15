@@ -141,8 +141,25 @@
         </junitlauncher>
     </target>
 
-    <!-- ===== GraalVM native-image target ===== -->
-    <target name="native-image" depends="build"
+    <!-- ===== GraalVM native-image targets ===== -->
+    <target name="compile-graal-feature" depends="build"
+        description="Compile the GraalVM AWTFeature substitution class">
+        <condition property="graalvm.home" value="${env.GRAALVM_HOME}" else="${java.home}">
+            <isset property="env.GRAALVM_HOME" />
+        </condition>
+        <javac srcdir="." includes="uk/ac/babraham/FastQC/graal/AWTFeature.java"
+            destdir="bin" includeantruntime="false" source="${source}" target="${target}">
+            <compilerarg value="--add-exports"/>
+            <compilerarg value="org.graalvm.nativeimage/org.graalvm.nativeimage.hosted=ALL-UNNAMED"/>
+            <compilerarg value="--add-exports"/>
+            <compilerarg value="org.graalvm.nativeimage/com.oracle.svm.core.annotate=ALL-UNNAMED"/>
+            <classpath>
+                <pathelement location="${graalvm.home}/lib/svm/builder/svm.jar" />
+            </classpath>
+        </javac>
+    </target>
+
+    <target name="native-image" depends="compile-graal-feature"
         description="Build a native executable using GraalVM native-image">
         <!-- Resolve GRAALVM_HOME: property, environment variable, or java.home -->
         <condition property="graalvm.home" value="${env.GRAALVM_HOME}" else="${java.home}">
