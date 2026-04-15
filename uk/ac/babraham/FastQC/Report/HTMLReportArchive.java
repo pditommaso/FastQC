@@ -163,11 +163,15 @@ public class HTMLReportArchive {
 				zip.closeEntry();
 				}
 			}
-		catch (Exception e) {
+		catch (Throwable e) {
+			// In native-image, XSLT compiled translets cannot be defined at
+			// runtime (UnsupportedFeatureError extends Error, not Exception).
+			// Catch Throwable so that zip.close() still runs and the archive
+			// is not corrupted. The fastqc.fo entry is optional.
 			e.printStackTrace();
 		}
-		
-		
+
+
 		zip.close();
 		
 		// Save the HTML file at the same level as the zip file
