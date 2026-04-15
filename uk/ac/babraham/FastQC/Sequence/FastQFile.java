@@ -22,7 +22,9 @@ package uk.ac.babraham.FastQC.Sequence;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.util.regex.Pattern;
 
 import org.itadaki.bzip2.BZip2InputStream;
@@ -41,9 +43,8 @@ public class FastQFile implements SequenceFile {
 	private boolean casavaMode = false;
 	private boolean nofilter = false;
 
-	// Byte-based line reader — bypasses BufferedReader/InputStreamReader
-	// for zero-copy ASCII parsing without UTF-8 decoding overhead
-	private ByteLineReader blr;
+	// Line reader — either mmap-based (uncompressed) or stream-based (compressed)
+	private LineReader blr;
 	// We'll keep count of the number of lines read for the error message
 	private long lineNumber = 0;
 
@@ -89,7 +90,11 @@ public class FastQFile implements SequenceFile {
 			blr = new ByteLineReader(new BZip2InputStream(fis,false));
 		}
 		else {
-			blr = new ByteLineReader(fis);
+			// Uncompressed file: use memory-mapped I/O for zero-copy reads
+			if (fis != null) fis.close();
+			fis = null;
+			FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.READ);
+			blr = new MappedByteLineReader(channel);
 		}
 		readNext();
 	}
@@ -103,10 +108,15 @@ public class FastQFile implements SequenceFile {
 		if (file.getName().startsWith("stdin")) {
 			return 0;
 		}
+		if (blr instanceof MappedByteLineReader) {
+			return ((MappedByteLineReader) blr).getPercentComplete();
+		}
 		try {
-			int percent = (int) (((double)fis.getChannel().position()/ fileSize)*100);
-			return percent;
-		} 
+			if (fis != null) {
+				int percent = (int) (((double)fis.getChannel().position()/ fileSize)*100);
+				return percent;
+			}
+		}
 		catch (IOException e) {
 			e.printStackTrace();
 		}

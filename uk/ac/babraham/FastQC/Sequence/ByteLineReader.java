@@ -14,7 +14,7 @@ import java.io.InputStream;
  * - Creates String directly from bytes (one allocation per line)
  * - Can do uppercase conversion on the buffer before String creation
  */
-public class ByteLineReader implements AutoCloseable {
+public class ByteLineReader implements LineReader {
 
     private final InputStream in;
     private final byte[] buf;

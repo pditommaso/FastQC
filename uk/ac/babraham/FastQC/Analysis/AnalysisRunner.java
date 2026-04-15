@@ -40,7 +40,7 @@ public class AnalysisRunner implements Runnable {
 	private static final int BATCH_SIZE = 1024;
 	private static final int QUEUE_CAPACITY = 32;
 	// Number of parallel module processing threads
-	private static final int NUM_PROCESSORS = 2;
+	private static final int NUM_PROCESSORS = 3;
 
 	public AnalysisRunner (SequenceFile file) {
 		this.file = file;
