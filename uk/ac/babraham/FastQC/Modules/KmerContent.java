@@ -22,7 +22,7 @@ package uk.ac.babraham.FastQC.Modules;
 import java.awt.BorderLayout;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Hashtable;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Vector;
 
@@ -47,7 +47,7 @@ import uk.ac.babraham.FastQC.Sequence.Sequence;
 
 public class KmerContent extends AbstractQCModule {
 
-	private Hashtable<String, Kmer> kmers = new Hashtable<String, Kmer>((int)Math.pow(4, MAX_KMER_SIZE));
+	private HashMap<String, Kmer> kmers = new HashMap<String, Kmer>((int)Math.pow(4, MAX_KMER_SIZE));
 	
 	private int longestSequence = 0;
 	
@@ -135,15 +135,12 @@ public class KmerContent extends AbstractQCModule {
 	
 		
 		if (position >= totalKmerCounts.length) {
-			// We need to expand the array
-			long [][] newCounts = new long[position+1][];
-			for (int i=0;i<totalKmerCounts.length;i++) {
-				newCounts[i] = totalKmerCounts[i];
-			}
-			for (int i=totalKmerCounts.length;i<newCounts.length;i++) {
+			int newLen = Math.max(position+1, totalKmerCounts.length * 2);
+			long [][] newCounts = new long[newLen][];
+			System.arraycopy(totalKmerCounts, 0, newCounts, 0, totalKmerCounts.length);
+			for (int i=totalKmerCounts.length;i<newLen;i++) {
 				newCounts[i] = new long[MAX_KMER_SIZE];
 			}
-			
 			totalKmerCounts = newCounts;
 		}
 		
@@ -357,11 +354,12 @@ public class KmerContent extends AbstractQCModule {
 				// Skip Kmers containing N
 				if (kmer.indexOf("N") >=0) continue;
 
-				if (kmers.containsKey(kmer)) {
-					kmers.get(kmer).incrementCount(i);
+				Kmer existing = kmers.get(kmer);
+				if (existing != null) {
+					existing.incrementCount(i);
 				}
 				else {
-					kmers.put(new String(kmer), new Kmer(kmer,i,(seq.length()-kmerSize)+1));
+					kmers.put(kmer, new Kmer(kmer,i,(seq.length()-kmerSize)+1));
 				}
 
 			}

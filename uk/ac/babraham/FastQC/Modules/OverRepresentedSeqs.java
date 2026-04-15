@@ -159,14 +159,15 @@ public class OverRepresentedSeqs extends AbstractQCModule {
 		// dup_length option.
 		
 		if (FastQCConfig.getInstance().dupLength != 0) {
-			seq = new String(seq.substring(0, FastQCConfig.getInstance().dupLength));			
+			seq = seq.substring(0, FastQCConfig.getInstance().dupLength);
 		}
 		else if (seq.length() > 50) {
-			seq = new String(seq.substring(0, 50));
+			seq = seq.substring(0, 50);
 		}
-				
-		if (sequences.containsKey(seq)) {
-			sequences.put(seq, sequences.get(seq)+1);
+
+		Long existingCount = sequences.get(seq);
+		if (existingCount != null) {
+			sequences.put(seq, existingCount + 1);
 			
 			// We need to increment the count at unique limit just in case
 			// we never hit the unique sequence limit, so we need to know 
