@@ -113,42 +113,36 @@ public class PerBaseSequenceContent extends AbstractQCModule {
 	
 	public void processSequence(Sequence sequence) {
 		calculated = false;
-		char [] seq = sequence.getSequence().toCharArray();
-		if (gCounts.length < seq.length) {
-			
-			long [] gCountsNew = new long [seq.length];
-			long [] aCountsNew = new long [seq.length];
-			long [] cCountsNew = new long [seq.length];
-			long [] tCountsNew = new long [seq.length];
+		String seq = sequence.getSequence();
+		int seqLen = seq.length();
+		if (gCounts.length < seqLen) {
 
-			for (int i=0;i<gCounts.length;i++) {
-				gCountsNew[i] = gCounts[i];
-				aCountsNew[i] = aCounts[i];
-				tCountsNew[i] = tCounts[i];
-				cCountsNew[i] = cCounts[i];
-			}		
+			int newLen = Math.max(seqLen, gCounts.length * 2);
+			long [] gCountsNew = new long [newLen];
+			long [] aCountsNew = new long [newLen];
+			long [] cCountsNew = new long [newLen];
+			long [] tCountsNew = new long [newLen];
+
+			System.arraycopy(gCounts, 0, gCountsNew, 0, gCounts.length);
+			System.arraycopy(aCounts, 0, aCountsNew, 0, aCounts.length);
+			System.arraycopy(tCounts, 0, tCountsNew, 0, tCounts.length);
+			System.arraycopy(cCounts, 0, cCountsNew, 0, cCounts.length);
 
 			gCounts = gCountsNew;
 			aCounts = aCountsNew;
 			tCounts = tCountsNew;
 			cCounts = cCountsNew;
 		}
-		
-		for (int i=0;i<seq.length;i++) {
-			if (seq[i] == 'G') {
-				++gCounts[i];
-			}
-			else if (seq[i] == 'A') {
-				++aCounts[i];
-			}
-			else if (seq[i] == 'T') {
-				++tCounts[i];
-			}
-			else if (seq[i] == 'C') {
-				++cCounts[i];
+
+		for (int i=0;i<seqLen;i++) {
+			switch (seq.charAt(i)) {
+				case 'G': ++gCounts[i]; break;
+				case 'A': ++aCounts[i]; break;
+				case 'T': ++tCounts[i]; break;
+				case 'C': ++cCounts[i]; break;
 			}
 		}
-		
+
 	}
 	
 	public void reset () {

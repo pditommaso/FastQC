@@ -123,21 +123,24 @@ public class BasicStats extends AbstractQCModule {
 			if (sequence.getSequence().length() > maxLength) maxLength = sequence.getSequence().length();
 		}
 
-		char [] chars = sequence.getSequence().toCharArray();
-		for (int c=0;c<chars.length;c++) {			
-			switch (chars[c]) {
+		String bases = sequence.getSequence();
+		int basesLen = bases.length();
+		for (int c=0;c<basesLen;c++) {
+			switch (bases.charAt(c)) {
 				case 'G': ++gCount;break;
 				case 'A': ++aCount;break;
 				case 'T': ++tCount;break;
 				case 'C': ++cCount;break;
-				case 'N': ++nCount;break;			
+				case 'N': ++nCount;break;
 			}
 		}
-		
-		chars = sequence.getQualityString().toCharArray();
-		for (int c=0;c<chars.length;c++) {
-			if (chars[c] < lowestChar) {
-				lowestChar = chars[c];
+
+		String qualStr = sequence.getQualityString();
+		int qualLen = qualStr.length();
+		for (int c=0;c<qualLen;c++) {
+			char ch = qualStr.charAt(c);
+			if (ch < lowestChar) {
+				lowestChar = ch;
 			}
 		}
 	}
