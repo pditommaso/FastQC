@@ -47,21 +47,29 @@ public class ImageToBase64 {
 	}
 
 	public static String svgImageToBase64 (String svgdata) {
-		
+
 
 		// We've moved to using the Java.util Base64 encoder which means that
-		// SVG output will only work on java v8+ but there was a bug in the 
+		// SVG output will only work on java v8+ but there was a bug in the
 		// library we were using which caused the last character to get lost
-		// some times so this is an easy fix and no one is using java <v8 
+		// some times so this is an easy fix and no one is using java <v8
 		// any more.
 
-		String data = "data:image/svg+xml;base64,"+java.util.Base64.getEncoder().encodeToString(svgdata.getBytes());			
+		String data = "data:image/svg+xml;base64,"+java.util.Base64.getEncoder().encodeToString(svgdata.getBytes());
 
 		return(data);
-		
+
 	}
 
-	
-	
-	
+	/**
+	 * Converts raw PNG bytes to a base64 data URI without using ImageIO/AWT.
+	 */
+	public static String rawPngToBase64(byte[] pngBytes) {
+		String b64 = java.util.Base64.getEncoder().encodeToString(pngBytes);
+		return "data:image/png;base64," + b64;
+	}
+
+
+
+
 }

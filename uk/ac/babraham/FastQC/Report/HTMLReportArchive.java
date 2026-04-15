@@ -19,7 +19,6 @@
  */
 package uk.ac.babraham.FastQC.Report;
 
-import java.awt.image.BufferedImage;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -37,7 +36,6 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
-import javax.imageio.ImageIO;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.stream.XMLOutputFactory;
@@ -380,8 +378,14 @@ public class HTMLReportArchive {
 	
 	private String base64ForIcon (String path) {
 		try {
-			BufferedImage b = ImageIO.read(ClassLoader.getSystemResource("Templates/"+path));
-			return (ImageToBase64.imageToBase64(b));
+			java.io.InputStream in = getClass().getResourceAsStream("/Templates/"+path);
+			if (in == null) return "Failed";
+			java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+			byte[] buf = new byte[4096];
+			int len;
+			while ((len = in.read(buf)) > 0) baos.write(buf, 0, len);
+			in.close();
+			return ImageToBase64.rawPngToBase64(baos.toByteArray());
 		}
 		catch (IOException ioe) {
 			ioe.printStackTrace();
