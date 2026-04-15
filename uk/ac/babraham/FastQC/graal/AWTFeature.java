@@ -1,5 +1,7 @@
 package uk.ac.babraham.FastQC.graal;
 
+import java.util.function.BooleanSupplier;
+
 import com.oracle.svm.core.annotate.Substitute;
 import com.oracle.svm.core.annotate.TargetClass;
 import org.graalvm.nativeimage.hosted.Feature;
@@ -49,8 +51,17 @@ final class Target_java_awt_GraphicsEnvironment {
     private static boolean getHeadlessProperty() { return true; }
 }
 
-@TargetClass(className = "sun.awt.PlatformGraphicsInfo")
+// isInAquaSession() only exists on macOS; skip this substitution on Linux
+@TargetClass(className = "sun.awt.PlatformGraphicsInfo",
+             onlyWith = Target_sun_awt_PlatformGraphicsInfo.IsMacOS.class)
 final class Target_sun_awt_PlatformGraphicsInfo {
+    static final class IsMacOS implements BooleanSupplier {
+        @Override
+        public boolean getAsBoolean() {
+            return System.getProperty("os.name", "").toLowerCase().contains("mac");
+        }
+    }
+
     @Substitute
     public static boolean isInAquaSession() { return false; }
 }
