@@ -20,114 +20,76 @@
 
 package uk.ac.babraham.FastQC.Modules;
 
-import java.awt.Graphics;
-import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamWriter;
-import javax.imageio.ImageIO;
 import javax.swing.JPanel;
 import javax.swing.table.TableModel;
 
-import uk.ac.babraham.FastQC.FastQCConfig;
 import uk.ac.babraham.FastQC.Report.HTMLReportArchive;
 import uk.ac.babraham.FastQC.Utilities.ImageToBase64;
-import uk.ac.babraham.FastQC.Utilities.ImageSaver.SVGImageSaver;
+import uk.ac.babraham.FastQC.Graphs.SVGDocument;
+import uk.ac.babraham.FastQC.Graphs.LineGraph;
+import uk.ac.babraham.FastQC.Graphs.QualityBoxPlot;
+import uk.ac.babraham.FastQC.Graphs.TileGraph;
 
 public abstract class AbstractQCModule implements QCModule {
 
-	protected 	void simpleXhtmlReport(HTMLReportArchive report,String svgData, BufferedImage image, String alt) throws XMLStreamException {
+	protected void writeDefaultImage(HTMLReportArchive report, String fileName, String imageTitle, int width, int height) throws IOException, XMLStreamException {
+		ZipOutputStream zip = report.zipFile();
+		JPanel resultsPanel = getResultsPanel();
+
+		// Generate SVG directly from graph data
+		String svgData = renderDirectSVG(resultsPanel, width, height);
+
+		// Write SVG to zip
+		String svgFilename = fileName.replaceAll("\\.png$", ".svg");
+		zip.putNextEntry(new ZipEntry(report.folderName() + "/Images/" + svgFilename));
+		zip.write(svgData.getBytes());
+		zip.closeEntry();
+
+		// Embed SVG in HTML
 		XMLStreamWriter xhtml = report.xhtmlStream();
 		xhtml.writeStartElement("p");
 		xhtml.writeEmptyElement("img");
 		xhtml.writeAttribute("class", "indented");
-		if (FastQCConfig.getInstance().svg_output) {
-			xhtml.writeAttribute("src", ImageToBase64.svgImageToBase64(svgData));
-		}
-		else {
-			xhtml.writeAttribute("src", ImageToBase64.imageToBase64(image));
-		}
-		xhtml.writeAttribute("alt", alt);
-		
-//		if(svgData!=null){
-//			xhtml.writeAttribute("width",String.valueOf(img.getWidth()));
-//			xhtml.writeAttribute("height",String.valueOf(img.getHeight()));
-//		}
-		
-		xhtml.writeEndElement();//p
-	}
-	
-	protected void writeDefaultImage (HTMLReportArchive report, String fileName, String imageTitle, int width, int height) throws IOException, XMLStreamException {
-		ZipOutputStream zip = report.zipFile();
-		
-		// Write out the svg version of the image		
-		JPanel resultsPanel = getResultsPanel();
-		resultsPanel.setSize(width,height);
-		resultsPanel.validate();
-
-		
-		String svgFilename = fileName.replaceAll("\\.png$", ".svg");
-		zip.putNextEntry(new ZipEntry(report.folderName()+"/Images/"+svgFilename));
-				
-		String svgData = SVGImageSaver.saveImage(resultsPanel, zip);
-		zip.closeEntry();
-
-		// Write out the png version of the image
-		zip.putNextEntry(new ZipEntry(report.folderName()+"/Images/"+fileName));
-		BufferedImage b = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-		Graphics g = b.createGraphics();
-
-		resultsPanel.setDoubleBuffered(false);
-		resultsPanel.addNotify();
-		resultsPanel.validate();
-		
-		resultsPanel.print(g);
-
-		g.dispose();
-		
-		ImageIO.write(b, "PNG", zip);
-		zip.closeEntry();
-
-		
-		simpleXhtmlReport(report, svgData, b, imageTitle);
-
+		xhtml.writeAttribute("src", ImageToBase64.svgImageToBase64(svgData));
+		xhtml.writeAttribute("alt", imageTitle);
+		xhtml.writeEndElement();
 	}
 
-	protected void writeSpecificImage (HTMLReportArchive report, JPanel resultsPanel, String fileName, String imageTitle, int width, int height) throws IOException, XMLStreamException {
+	protected void writeSpecificImage(HTMLReportArchive report, JPanel resultsPanel, String fileName, String imageTitle, int width, int height) throws IOException, XMLStreamException {
 		ZipOutputStream zip = report.zipFile();
-		
-		// Write out the svg version of the image		
-		resultsPanel.setSize(width,height);
-		resultsPanel.validate();
 
-		
+		String svgData = renderDirectSVG(resultsPanel, width, height);
+
 		String svgFilename = fileName.replaceAll("\\.png$", ".svg");
-		zip.putNextEntry(new ZipEntry(report.folderName()+"/Images/"+svgFilename));
-				
-		String svgData = SVGImageSaver.saveImage(resultsPanel, zip);
+		zip.putNextEntry(new ZipEntry(report.folderName() + "/Images/" + svgFilename));
+		zip.write(svgData.getBytes());
 		zip.closeEntry();
 
-		// Write out the png version of the image
-		zip.putNextEntry(new ZipEntry(report.folderName()+"/Images/"+fileName));
-		BufferedImage b = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-		Graphics g = b.createGraphics();
+		XMLStreamWriter xhtml = report.xhtmlStream();
+		xhtml.writeStartElement("p");
+		xhtml.writeEmptyElement("img");
+		xhtml.writeAttribute("class", "indented");
+		xhtml.writeAttribute("src", ImageToBase64.svgImageToBase64(svgData));
+		xhtml.writeAttribute("alt", imageTitle);
+		xhtml.writeEndElement();
+	}
 
-		resultsPanel.setDoubleBuffered(false);
-		resultsPanel.addNotify();
-		resultsPanel.validate();
-		
-		resultsPanel.print(g);
-
-		g.dispose();
-		
-		ImageIO.write(b, "PNG", zip);
-		zip.closeEntry();
-
-		
-		simpleXhtmlReport(report, svgData, b, imageTitle);
+	private String renderDirectSVG(JPanel panel, int width, int height) {
+		SVGDocument doc = new SVGDocument(width, height);
+		if (panel instanceof LineGraph) {
+			((LineGraph) panel).renderToSVG(doc);
+		} else if (panel instanceof QualityBoxPlot) {
+			((QualityBoxPlot) panel).renderToSVG(doc);
+		} else if (panel instanceof TileGraph) {
+			((TileGraph) panel).renderToSVG(doc);
+		}
+		return doc.toString();
 	}
 
 

@@ -140,4 +140,33 @@
             </testclasses>
         </junitlauncher>
     </target>
+
+    <!-- ===== GraalVM native-image target ===== -->
+    <target name="native-image" depends="build"
+        description="Build a native executable using GraalVM native-image">
+        <!-- Resolve GRAALVM_HOME: property, environment variable, or java.home -->
+        <condition property="graalvm.home" value="${env.GRAALVM_HOME}" else="${java.home}">
+            <isset property="env.GRAALVM_HOME" />
+        </condition>
+        <property name="native-image.exe" value="${graalvm.home}/bin/native-image" />
+        <property name="native-image.output" value="fastqc" />
+
+        <echo message="Using native-image: ${native-image.exe}" />
+        <exec executable="${native-image.exe}" failonerror="true">
+            <arg value="-cp" />
+            <arg value="bin:jbzip2-0.9.jar:htsjdk.jar:cisd-jhdf5.jar" />
+            <arg value="-H:+UnlockExperimentalVMOptions" />
+            <arg value="-H:ResourceConfigurationFiles=META-INF/native-image/resource-config.json" />
+            <arg value="-H:ReflectionConfigurationFiles=META-INF/native-image/reflect-config.json" />
+            <arg value="-H:JNIConfigurationFiles=META-INF/native-image/jni-config.json" />
+            <arg value="-H:SerializationConfigurationFiles=META-INF/native-image/serialization-config.json" />
+            <arg value="-H:DynamicProxyConfigurationFiles=META-INF/native-image/proxy-config.json" />
+            <arg value="--no-fallback" />
+            <arg value="-Djava.awt.headless=true" />
+            <arg value="--features=uk.ac.babraham.FastQC.graal.AWTFeature" />
+            <arg value="-o" />
+            <arg value="${native-image.output}" />
+            <arg value="uk.ac.babraham.FastQC.FastQCApplication" />
+        </exec>
+    </target>
 </project>

@@ -246,8 +246,139 @@ public class LineGraph extends JPanel {
 		
 	}
 
+	public void renderToSVG(SVGDocument doc) {
+		int w = doc.getWidth();
+		int h = doc.getHeight();
+
+		doc.setColor(255, 255, 255);
+		doc.fillRect(0, 0, w, h);
+		doc.setColor(0, 0, 0);
+
+		int lastY = 0;
+
+		double yStart;
+
+		if (minY % yInterval == 0) {
+			yStart = minY;
+		}
+		else {
+			yStart = yInterval * (((int)minY/yInterval)+1);
+		}
+
+		int xOffset = 0;
+
+		for (double i=yStart;i<=maxY;i+=yInterval) {
+			String label = ""+i;
+			label = label.replaceAll(".0$", "");
+			int width = doc.stringWidth(label);
+			if (width > xOffset) {
+				xOffset = width;
+			}
+
+			doc.drawString(label, 2, getY(i, h)+(doc.fontAscent()/2));
+		}
+
+		// Give the x axis a bit of breathing space
+		xOffset += 5;
+
+		// Draw the graph title
+		int titleWidth = doc.stringWidth(graphTitle);
+		doc.drawString(graphTitle, (xOffset + ((w-(xOffset+10))/2)) - (titleWidth/2), 30);
+
+
+		// Now draw the axes
+		doc.drawLine(xOffset, h-40, w-10, h-40);
+		doc.drawLine(xOffset, h-40, xOffset, 40);
+
+		// Draw the xLabel under the xAxis
+		doc.drawString(xLabel, (w/2) - (doc.stringWidth(xLabel)/2), h-5);
+
+
+		// Now draw the data points
+		int baseWidth = (w-(xOffset+10))/Math.max(data[0].length,1);
+		if (baseWidth<1) baseWidth=1;
+
+		// First draw faint boxes over alternating bases so you can see which is which
+
+		int lastXLabelEnd = 0;
+
+		for (int i=0;i<data[0].length;i++) {
+			if (i%2 != 0) {
+				doc.setColor(230, 230, 230);
+				doc.fillRect(xOffset+(baseWidth*i), 40, baseWidth, h-80);
+			}
+			doc.setColor(0, 0, 0);
+			String baseNumber = ""+xCategories[i];
+			int baseNumberWidth = doc.stringWidth(baseNumber);
+			int baseNumberPosition =  (baseWidth/2)+xOffset+(baseWidth*i)-(baseNumberWidth/2);
+
+			if (baseNumberPosition > lastXLabelEnd) {
+				doc.drawString(baseNumber,baseNumberPosition, h-25);
+				lastXLabelEnd = baseNumberPosition+baseNumberWidth+5;
+			}
+		}
+
+		// Now draw horizontal lines across from the y axis
+
+		doc.setColor(180, 180, 180);
+		for (double i=yStart;i<=maxY;i+=yInterval) {
+			doc.drawLine(xOffset, getY(i, h), w-10, getY(i, h));
+		}
+		doc.setColor(0, 0, 0);
+
+		// Now draw the datasets
+
+		for (int d=0;d<data.length;d++) {
+			Color c = COLOURS[d % COLOURS.length];
+			doc.setColor(c.getRed(), c.getGreen(), c.getBlue());
+
+			if (data[d].length > 0)
+				lastY = getY(data[d][0], h);
+			for (int i=1;i<data[d].length;i++) {
+				int thisY = getY(data[d][i], h);
+				doc.drawLine((baseWidth/2)+xOffset+(baseWidth*(i-1)), lastY, (baseWidth/2)+xOffset+(baseWidth*i), thisY);
+				lastY = thisY;
+			}
+
+		}
+
+		// Now draw the data legend
+
+		doc.setFontSize(12, true);
+
+		// First we need to find the widest label
+		int widestLabel = 0;
+		for (int t=0;t<xTitles.length;t++) {
+			int width = doc.stringWidth(xTitles[t]);
+			if (width > widestLabel) widestLabel = width;
+		}
+
+		// Add 3px either side for a bit of space;
+		widestLabel += 6;
+
+		// First draw a box to put the legend in
+		doc.setColor(255, 255, 255);
+		doc.fillRect((w-10)-widestLabel, 40, widestLabel, 3+(20*xTitles.length));
+		doc.setColor(192, 192, 192);
+		doc.drawRect((w-10)-widestLabel, 40, widestLabel, 3+(20*xTitles.length));
+
+		// Now draw the actual labels
+		for (int t=0;t<xTitles.length;t++) {
+			Color c = COLOURS[t % COLOURS.length];
+			doc.setColor(c.getRed(), c.getGreen(), c.getBlue());
+			doc.drawString(xTitles[t], ((w-10)-widestLabel)+3, 35+(20*(t+1)));
+		}
+
+		// Put the font back to normal
+		doc.setFontSize(12, false);
+	}
+
+	private int getY(double y, int height) {
+		return (height-40) - (int)(((height-80)/(maxY-minY))*y);
+	}
+
 	private int getY(double y) {
 		return (getHeight()-40) - (int)(((getHeight()-80)/(maxY-minY))*y);
 	}
-	
+
 }

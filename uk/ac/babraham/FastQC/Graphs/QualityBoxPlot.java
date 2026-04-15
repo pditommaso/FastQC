@@ -203,8 +203,147 @@ public class QualityBoxPlot extends JPanel {
 		
 	}
 
+	public void renderToSVG(SVGDocument doc) {
+		int w = doc.getWidth();
+		int h = doc.getHeight();
+
+		doc.setColor(255, 255, 255);
+		doc.fillRect(0, 0, w, h);
+		doc.setColor(0, 0, 0);
+
+		int lastY = 0;
+
+		double yStart;
+
+		if (minY % yInterval == 0) {
+			yStart = minY;
+		}
+		else {
+			yStart = yInterval * (((int)minY/yInterval)+1);
+		}
+
+		int xOffset = 0;
+
+		for (double i=yStart;i<=maxY;i+=yInterval) {
+			String label = ""+i;
+			label = label.replaceAll(".0$", "");
+			int width = doc.stringWidth(label);
+			if (width > xOffset) {
+				xOffset = width;
+			}
+
+			doc.drawString(label, 2, getY(i, h)+(doc.fontAscent()/2));
+		}
+
+		// Give the x axis a bit of breathing space
+		xOffset += 5;
+
+		doc.setColor(0, 0, 0);
+
+		// Draw the graph title
+		int titleWidth = doc.stringWidth(graphTitle);
+		doc.drawString(graphTitle, (xOffset + ((w-(xOffset+10))/2)) - (titleWidth/2), 30);
+
+
+		// Work out the width of the x axis bins
+		int baseWidth = (w-(xOffset+10))/means.length;
+		if (baseWidth<1) baseWidth = 1;
+
+		// First draw faint boxes over alternating bases so you can see which is which
+
+		int lastXLabelEnd = 0;
+
+		for (int i=0;i<means.length;i++) {		// Now draw some background colours which show good / bad quality
+			if (i%2 != 0) {
+				doc.setColor(230, 195, 195);
+			}
+			else {
+				doc.setColor(230, 175, 175);
+			}
+
+			doc.fillRect(xOffset+(baseWidth*i), getY(20, h), baseWidth, getY(yStart, h)-getY(20, h));
+
+			if (i%2 != 0) {
+				doc.setColor(230, 220, 195);
+			}
+			else {
+				doc.setColor(230, 215, 175);
+			}
+
+			doc.fillRect(xOffset+(baseWidth*i), getY(28, h), baseWidth, getY(20, h)-getY(28, h));
+
+			if (i%2 != 0) {
+				doc.setColor(195, 230, 195);
+			}
+			else {
+				doc.setColor(175, 230, 175);
+			}
+
+			doc.fillRect(xOffset+(baseWidth*i), getY(maxY, h), baseWidth, getY(28, h)-getY(maxY, h));
+
+			doc.setColor(0, 0, 0);
+			int baseNumberWidth = doc.stringWidth(xLabels[i]);
+			int labelStart = ((baseWidth/2)+xOffset+(baseWidth*i))-(baseNumberWidth/2);
+
+			if (labelStart > lastXLabelEnd) {
+				doc.drawString(xLabels[i], labelStart, h-25);
+				lastXLabelEnd = labelStart+doc.stringWidth(xLabels[i])+5;
+			}
+		}
+
+		// Now draw the axes
+		doc.drawLine(xOffset, h-40, w-10, h-40);
+		doc.drawLine(xOffset, h-40, xOffset, 40);
+		String posLabel = "Position in read (bp)";
+		doc.drawString(posLabel, (w/2) - (doc.stringWidth(posLabel)/2), h-5);
+
+		// Now draw the boxplots
+
+		for (int i=0;i<medians.length;i++) {
+
+			int boxBottomY = getY(lowerQuartile[i], h);
+			int boxTopY = getY(upperQuartile[i], h);
+			int lowerWhiskerY = getY(lowest[i], h);
+			int upperWhiskerY = getY(highest[i], h);
+			int medianY = getY(medians[i], h);
+
+			// Draw the main box
+			doc.setColor(240, 240, 0);
+			doc.fillRect(xOffset+(baseWidth*i)+2, boxTopY, baseWidth-4, boxBottomY-boxTopY);
+			doc.setColor(0, 0, 0);
+			doc.drawRect(xOffset+(baseWidth*i)+2, boxTopY, baseWidth-4, boxBottomY-boxTopY);
+
+			// Draw the upper whisker
+			doc.drawLine(xOffset+(baseWidth*i)+(baseWidth/2), upperWhiskerY, xOffset+(baseWidth*i)+(baseWidth/2), boxTopY);
+			doc.drawLine(xOffset+(baseWidth*i)+2, upperWhiskerY, xOffset+(baseWidth*(i+1))-2, upperWhiskerY);
+
+			// Draw the lower whisker
+			doc.drawLine(xOffset+(baseWidth*i)+(baseWidth/2), lowerWhiskerY, xOffset+(baseWidth*i)+(baseWidth/2), boxBottomY);
+			doc.drawLine(xOffset+(baseWidth*i)+2, lowerWhiskerY, xOffset+(baseWidth*(i+1))-2, lowerWhiskerY);
+
+			// Draw the median line
+			doc.setColor(200, 0, 0);
+			doc.drawLine(xOffset+(baseWidth*i)+2, medianY, (xOffset+(baseWidth*(i+1)))-2, medianY);
+
+		}
+
+		// Now overlay the means
+		doc.setColor(0, 0, 200);
+		lastY = getY(means[0], h);
+		for (int i=1;i<means.length;i++) {
+			int thisY = getY(means[i], h);
+			doc.drawLine((baseWidth/2)+xOffset+(baseWidth*(i-1)), lastY, (baseWidth/2)+xOffset+(baseWidth*i), thisY);
+			lastY = thisY;
+		}
+
+	}
+
+	private int getY(double y, int height) {
+		return (height-40) - (int)(((height-80)/(maxY-minY))*(y-minY));
+	}
+
 	public int getY(double y) {
 		return (getHeight()-40) - (int)(((getHeight()-80)/(maxY-minY))*(y-minY));
 	}
-	
+
 }
