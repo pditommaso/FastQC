@@ -87,31 +87,31 @@ public class NContent extends AbstractQCModule {
 		
 	public void processSequence(Sequence sequence) {
 		calculated = false;
-		char [] seq = sequence.getSequence().toCharArray();
-		if (nCounts.length < seq.length) {
+		String seq = sequence.getSequence();
+		int seqLen = seq.length();
+		if (nCounts.length < seqLen) {
 			// We need to expand the size of the data structures
-			
-			long [] nCountsNew = new long [seq.length];
-			long [] notNCountsNew = new long [seq.length];
 
-			for (int i=0;i<nCounts.length;i++) {
-				nCountsNew[i] = nCounts[i];
-				notNCountsNew[i] = notNCounts[i];
-			}
-			
+			int newLen = Math.max(seqLen, nCounts.length * 2);
+			long [] nCountsNew = new long [newLen];
+			long [] notNCountsNew = new long [newLen];
+
+			System.arraycopy(nCounts, 0, nCountsNew, 0, nCounts.length);
+			System.arraycopy(notNCounts, 0, notNCountsNew, 0, notNCounts.length);
+
 			nCounts = nCountsNew;
 			notNCounts = notNCountsNew;
 		}
-		
-		for (int i=0;i<seq.length;i++) {
-			if (seq[i] == 'N') {
+
+		for (int i=0;i<seqLen;i++) {
+			if (seq.charAt(i) == 'N') {
 				++nCounts[i];
 			}
 			else {
 				++notNCounts[i];
 			}
 		}
-		
+
 	}
 	
 	public void reset () {

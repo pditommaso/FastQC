@@ -256,31 +256,32 @@ public class PerTileQualityScores extends AbstractQCModule {
 			return;
 		}
 
-		char [] qual = sequence.getQualityString().toCharArray();
-		if (currentLength < qual.length) {
+		String qual = sequence.getQualityString();
+		int qualLen = qual.length();
+		if (currentLength < qualLen) {
 
 			Iterator<Integer> tiles = perTileQualityCounts.keySet().iterator();
 			while (tiles.hasNext()) {
 				int thisTile = tiles.next();
 
 				QualityCount [] qualityCounts = perTileQualityCounts.get(thisTile);
-				QualityCount [] qualityCountsNew = new QualityCount[qual.length];
+				QualityCount [] qualityCountsNew = new QualityCount[qualLen];
 
 				for (int i=0;i<qualityCounts.length;i++) {
 					qualityCountsNew[i] = qualityCounts[i];
 				}
 				for (int i=qualityCounts.length;i<qualityCountsNew.length;i++) {
-					qualityCountsNew[i] = new QualityCount();				
+					qualityCountsNew[i] = new QualityCount();
 				}
 				perTileQualityCounts.put(thisTile, qualityCountsNew);
 			}
 
-			currentLength = qual.length;
+			currentLength = qualLen;
 
 		}
 
 		if (! perTileQualityCounts.containsKey(tile)) {
-			
+
 			if (perTileQualityCounts.size() > 2500) {
 				// There are too many tiles, so we're probably parsing this wrong.
 				// Let's give up
@@ -289,7 +290,7 @@ public class PerTileQualityScores extends AbstractQCModule {
 				perTileQualityCounts.clear();
 				return;
 			}
-			
+
 			QualityCount [] qualityCounts = new QualityCount[currentLength];
 			for (int i=0;i<currentLength;i++) {
 				qualityCounts[i] = new QualityCount();
@@ -300,8 +301,8 @@ public class PerTileQualityScores extends AbstractQCModule {
 
 		QualityCount [] qualityCounts = perTileQualityCounts.get(tile);
 
-		for (int i=0;i<qual.length;i++) {
-			qualityCounts[i].addValue(qual[i]);
+		for (int i=0;i<qualLen;i++) {
+			qualityCounts[i].addValue(qual.charAt(i));
 		}
 
 	}

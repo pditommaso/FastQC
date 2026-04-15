@@ -181,6 +181,7 @@
             <arg value="--no-fallback" />
             <arg value="-Djava.awt.headless=true" />
             <arg value="--features=uk.ac.babraham.FastQC.graal.AWTFeature" />
+            <arg line="${native-image.extra-args}" />
             <arg value="-o" />
             <arg value="${native-image.output}" />
             <arg value="uk.ac.babraham.FastQC.FastQCApplication" />

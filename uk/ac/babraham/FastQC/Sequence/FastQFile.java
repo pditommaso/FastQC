@@ -35,6 +35,8 @@ import uk.ac.babraham.FastQC.Utilities.MultiMemberGZIPInputStream;
 
 public class FastQFile implements SequenceFile {
 
+	private static final Pattern COLORSPACE_PATTERN = Pattern.compile("^[GATCNgatcn][\\.0123456]+$");
+
 	private Sequence nextSequence = null;
 	private File file;
 	private long fileSize = 0;
@@ -76,18 +78,22 @@ public class FastQFile implements SequenceFile {
 			fis = new FileInputStream(file);
 		}
 				
+		// Use large buffers for I/O — the default 8KB is far too small for multi-GB files.
+		// 128KB BufferedReader + 64KB inflate buffer significantly reduces syscall overhead.
+		int readerBufSize = 128 * 1024;
+		int gzipBufSize = 64 * 1024;
+
 		if (file.getName().startsWith("stdin")) {
-			br = new BufferedReader(new InputStreamReader(System.in));
+			br = new BufferedReader(new InputStreamReader(System.in), readerBufSize);
 		}
 		else if (file.getName().toLowerCase().endsWith(".gz") || (Files.probeContentType(file.toPath()) != null && (Files.probeContentType(file.toPath()).equals("application/x-gzip") || Files.probeContentType(file.toPath()).equals("application/gzip")))) {
-			br = new BufferedReader(new InputStreamReader(new MultiMemberGZIPInputStream(fis)));
-		} 
+			br = new BufferedReader(new InputStreamReader(new MultiMemberGZIPInputStream(fis, gzipBufSize)), readerBufSize);
+		}
 		else if (file.getName().toLowerCase().endsWith(".bz2")) {
-			br = new BufferedReader(new InputStreamReader(new BZip2InputStream(fis,false)));
-		} 
-
+			br = new BufferedReader(new InputStreamReader(new BZip2InputStream(fis,false)), readerBufSize);
+		}
 		else {
-			br = new BufferedReader(new InputStreamReader(fis));
+			br = new BufferedReader(new InputStreamReader(fis), readerBufSize);
 		}
 		readNext();
 	}
@@ -194,11 +200,12 @@ public class FastQFile implements SequenceFile {
 				checkColorspace(seq);
 			}
 
+			String upperSeq = seq.toUpperCase();
 			if (isColorspace()) {
-				nextSequence = new Sequence(this,convertColorspaceToBases(seq.toUpperCase()), seq.toUpperCase(), quality, id);
-			} 
+				nextSequence = new Sequence(this,convertColorspaceToBases(upperSeq), upperSeq, quality, id);
+			}
 			else {
-				nextSequence = new Sequence(this, seq.toUpperCase(),quality, id);
+				nextSequence = new Sequence(this, upperSeq, quality, id);
 			}
 
 			// If we're running in --casava mode then we will flag any sequences which
@@ -226,14 +233,7 @@ public class FastQFile implements SequenceFile {
 		// Some basecalled files can be all dots, which leads to them
 		// being identified as colorspace data. This check should find
 		// only true colorspace files.
-		String regex = "^[GATCNgatcn][\\.0123456]+$";
-		Pattern pattern = Pattern.compile(regex);
-		Matcher matcher = pattern.matcher(seq);
-		if (matcher.find()) {
-			isColorspace = true;
-		} else {
-			isColorspace = false;
-		}
+		isColorspace = COLORSPACE_PATTERN.matcher(seq).find();
 	}
 
 	private String convertColorspaceToBases(String s) {

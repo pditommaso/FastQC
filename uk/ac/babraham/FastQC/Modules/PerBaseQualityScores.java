@@ -129,23 +129,23 @@ public class PerBaseQualityScores extends AbstractQCModule {
 	public void processSequence(Sequence sequence) {
 		
 		calculated = false;
-		char [] qual = sequence.getQualityString().toCharArray();
-		if (qualityCounts.length < qual.length) {
-			
-			QualityCount [] qualityCountsNew = new QualityCount[qual.length];
-			
-			for (int i=0;i<qualityCounts.length;i++) {
-				qualityCountsNew[i] = qualityCounts[i];
-			}
-			for (int i=qualityCounts.length;i<qualityCountsNew.length;i++) {
-				qualityCountsNew[i] = new QualityCount();				
+		String qual = sequence.getQualityString();
+		int qualLen = qual.length();
+		if (qualityCounts.length < qualLen) {
+
+			int newLen = Math.max(qualLen, qualityCounts.length * 2);
+			QualityCount [] qualityCountsNew = new QualityCount[newLen];
+
+			System.arraycopy(qualityCounts, 0, qualityCountsNew, 0, qualityCounts.length);
+			for (int i=qualityCounts.length;i<newLen;i++) {
+				qualityCountsNew[i] = new QualityCount();
 			}
 			qualityCounts = qualityCountsNew;
-			
+
 		}
-		
-		for (int i=0;i<qual.length;i++) {
-			qualityCounts[i].addValue(qual[i]);
+
+		for (int i=0;i<qualLen;i++) {
+			qualityCounts[i].addValue(qual.charAt(i));
 		}
 		
 	}
