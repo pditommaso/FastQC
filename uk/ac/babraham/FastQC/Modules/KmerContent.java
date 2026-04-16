@@ -131,9 +131,8 @@ public class KmerContent extends AbstractQCModule {
 	 * @param position Position within the read.  0 indexed
 	 * @param kmerLength Actual length of the Kmer analysed
 	 */
-	private void addKmerCount (int position,int kmerLength, String kmer) {
-	
-		
+	private void addKmerCount (int position,int kmerLength, boolean hasN) {
+
 		if (position >= totalKmerCounts.length) {
 			int newLen = Math.max(position+1, totalKmerCounts.length * 2);
 			long [][] newCounts = new long[newLen][];
@@ -143,11 +142,11 @@ public class KmerContent extends AbstractQCModule {
 			}
 			totalKmerCounts = newCounts;
 		}
-		
-		if (kmer.indexOf("N") >=0) return;
+
+		if (hasN) return;
 
 		++totalKmerCounts[position][kmerLength-1];
-		
+
 	}
 
 	private synchronized void calculateEnrichment () {
@@ -337,31 +336,40 @@ public class KmerContent extends AbstractQCModule {
 			longestSequence = seq.length();
 		}
 						
-		// Now we go through all of the Kmers to count these
+		// Optimized kmer scanning:
+		// - Track N positions to avoid indexOf("N") per kmer
+		// - Skip redundant length checks
+		int seqLen = seq.length();
 		for (int kmerSize=MIN_KMER_SIZE;kmerSize<=MAX_KMER_SIZE;kmerSize++) {
-			for (int i=0;i<=seq.length()-kmerSize;i++) {
-				
-				String kmer = seq.substring(i, i+kmerSize);
-				
-				if (kmer.length() != kmerSize) {
-					throw new IllegalStateException("String length "+kmer.length()+" wasn't the same as the kmer length "+kmerSize);
-				}
-				
-				// Add to the counts before skipping Kmers containing Ns (see
-				// explanation in addKmerCount for the reasoning).
-				addKmerCount(i, kmerSize, kmer);
-				
-				// Skip Kmers containing N
-				if (kmer.indexOf("N") >=0) continue;
+			int maxPos = seqLen - kmerSize;
+			int totalPositions = maxPos + 1;
 
+			// Pre-scan for N positions to avoid per-kmer indexOf
+			int nCountInWindow = 0;
+			for (int j = 0; j < kmerSize && j < seqLen; j++) {
+				if (seq.charAt(j) == 'N') nCountInWindow++;
+			}
+
+			for (int i=0;i<=maxPos;i++) {
+				if (i > 0) {
+					// Slide window: remove old char, add new char
+					if (seq.charAt(i - 1) == 'N') nCountInWindow--;
+					if (seq.charAt(i + kmerSize - 1) == 'N') nCountInWindow++;
+				}
+
+				// Always expand totalKmerCounts (even for N-containing kmers)
+				addKmerCount(i, kmerSize, nCountInWindow > 0);
+
+				if (nCountInWindow > 0) continue;
+
+				String kmer = seq.substring(i, i + kmerSize);
 				Kmer existing = kmers.get(kmer);
 				if (existing != null) {
 					existing.incrementCount(i);
 				}
 				else {
-					kmers.put(kmer, new Kmer(kmer,i,(seq.length()-kmerSize)+1));
+					kmers.put(kmer, new Kmer(kmer, i, totalPositions));
 				}
-
 			}
 		}
 	}
