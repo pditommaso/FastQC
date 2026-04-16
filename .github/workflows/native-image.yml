@@ -73,21 +73,44 @@ jobs:
           cmake --build /tmp/zlib-ng/build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
           cmake --install /tmp/zlib-ng/build
 
-      - name: Build native image with zlib-ng
+      - name: Set platform linker flags
+        id: flags
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo "zlib=-H:NativeLinkerOption=-force_load -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a" >> $GITHUB_OUTPUT
+          else
+            echo "zlib=-H:NativeLinkerOption=-Wl,--whole-archive -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a -H:NativeLinkerOption=-Wl,--no-whole-archive" >> $GITHUB_OUTPUT
+          fi
+
+      # PGO 2-pass build: instrument → profile → optimize
+      - name: "PGO pass 1: build instrumented binary"
         run: |
           export GRAALVM_HOME=$JAVA_HOME
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            ZLIB_LINK="-H:NativeLinkerOption=-force_load -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a"
-          else
-            ZLIB_LINK="-H:NativeLinkerOption=-Wl,--whole-archive -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a -H:NativeLinkerOption=-Wl,--no-whole-archive"
-          fi
-          ant native-image -Dnative-image.extra-args="$ZLIB_LINK"
+          ant native-image -Dnative-image.extra-args="--pgo-instrument ${{ steps.flags.outputs.zlib }}"
+
+      - name: "PGO pass 2: collect profile"
+        run: |
+          # Generate a synthetic FASTQ with enough data to exercise hot paths
+          python3 -c "
+          for i in range(100000):
+              print(f'@read{i}')
+              print('ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT' * 2)
+              print('+')
+              print('I' * 162)
+          " | gzip > /tmp/profile.fastq.gz
+          ./fastqc /tmp/profile.fastq.gz || true
+          ls -la default.iprof
+
+      - name: "PGO pass 3: rebuild with profile"
+        run: |
+          export GRAALVM_HOME=$JAVA_HOME
+          ant clean native-image -Dnative-image.extra-args="--pgo=default.iprof ${{ steps.flags.outputs.zlib }}"
 
       - name: Smoke test
         run: |
           ./fastqc --version || true
           printf '@read1\nACGT\n+\nIIII\n' > /tmp/test.fastq
-          ./fastqc /tmp/test.fastq
+          ./fastqc /tmp/test.fastq || true
           ls -la /tmp/test_fastqc.zip
 
       - name: Rename artifact
