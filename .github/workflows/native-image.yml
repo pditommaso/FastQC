@@ -76,8 +76,12 @@ jobs:
       - name: Build native image with zlib-ng
         run: |
           export GRAALVM_HOME=$JAVA_HOME
-          ant native-image \
-            -Dnative-image.extra-args="-H:NativeLinkerOption=-force_load -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            ZLIB_LINK="-H:NativeLinkerOption=-force_load -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a"
+          else
+            ZLIB_LINK="-H:NativeLinkerOption=-Wl,--whole-archive -H:NativeLinkerOption=/tmp/zlib-ng-compat/lib/libz.a -H:NativeLinkerOption=-Wl,--no-whole-archive"
+          fi
+          ant native-image -Dnative-image.extra-args="$ZLIB_LINK"
 
       - name: Smoke test
         run: |
