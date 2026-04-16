@@ -31,7 +31,7 @@ public class Sequence {
 	public Sequence (SequenceFile file,String sequence, String quality, String id) {
 		this.id = id;
 		this.file = file;
-		this.sequence = sequence.toUpperCase();
+		this.sequence = sequence; // caller is responsible for uppercasing
 		this.quality = quality;
 		this.colorspace = null;
 		this.isFiltered = false;
