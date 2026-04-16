@@ -167,6 +167,7 @@
         </condition>
         <property name="native-image.exe" value="${graalvm.home}/bin/native-image" />
         <property name="native-image.output" value="fastqc" />
+        <property name="native-image.extra-args" value="" />
 
         <echo message="Using native-image: ${native-image.exe}" />
         <exec executable="${native-image.exe}" failonerror="true">
