@@ -178,11 +178,11 @@ public class PerSequenceGCContent extends AbstractQCModule {
 		
 		
 		int thisSeqGCCount = 0;
+		// Bases are random, so count without branches which would mostly be mispredicted.
+		// The non-short-circuit '|' is deliberate: '||' would reintroduce a branch.
 		for (int i=0;i<seqLen;i++) {
 			char b = seq.charAt(i);
-			if (b == 'G' || b == 'C') {
-				++thisSeqGCCount;
-			}
+			thisSeqGCCount += (b == 'G' | b == 'C') ? 1 : 0;
 		}
 
 		if (seqLen >= cachedModels.length) {

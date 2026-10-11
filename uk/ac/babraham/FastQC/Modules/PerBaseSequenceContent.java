@@ -135,20 +135,17 @@ public class PerBaseSequenceContent extends AbstractQCModule {
 			cCounts = cCountsNew;
 		}
 		
+		// Bases are random, so count without branches which would mostly be mispredicted:
+		// each base adds 0 or 1 to all four arrays (one G/A/T/C match at most, so the
+		// counts are the same as the old if/else chain). Local copies of the arrays
+		// avoid re-reading the fields on every iteration.
+		long [] g = gCounts, a = aCounts, t = tCounts, c = cCounts;
 		for (int i=0;i<seqLen;i++) {
 			char b = seq.charAt(i);
-			if (b == 'G') {
-				++gCounts[i];
-			}
-			else if (b == 'A') {
-				++aCounts[i];
-			}
-			else if (b == 'T') {
-				++tCounts[i];
-			}
-			else if (b == 'C') {
-				++cCounts[i];
-			}
+			g[i] += b == 'G' ? 1 : 0;
+			a[i] += b == 'A' ? 1 : 0;
+			t[i] += b == 'T' ? 1 : 0;
+			c[i] += b == 'C' ? 1 : 0;
 		}
 		
 	}
