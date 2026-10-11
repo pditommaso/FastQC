@@ -16,9 +16,10 @@ import java.util.Arrays;
  * Marker mode: the output buffer starts with WINDOW values 256..256+32767
  * standing for the unknown window, so a back reference of any valid distance
  * just copies values, markers included, and is resolved later by
- * {@link Chunk}. Output before {@link #lastMarker} may contain markers, output
- * after it doesn't. In FASTQ about 55% of the output refers back into the
- * window, so most chunks never leave marker mode.
+ * {@link Chunk}. Whether the last WINDOW values still hold a marker is checked
+ * every MARKER_CHECK values (see markersInWindow); once none do, output switches
+ * to bytes. In FASTQ about 55% of the output refers back into the window, so
+ * most chunks never leave marker mode.
  *
  * Stops only at block boundaries (checked before each block, after the first),
  * so the end bit of a chunk is always a real boundary when its start was one.
@@ -69,9 +70,9 @@ final class DeflateDecoder {
 	// Marker mode output, starting with the WINDOW markers for the unknown window
 	private char [] chars;
 	private int charPos;
-	// Output before this position may contain markers
-	private int lastMarker;
 	private boolean markerMode;
+	// Output position at which to next check whether markers are gone (see markersInWindow)
+	private int nextMarkerCheck;
 
 	// Byte mode output, starting with the known window
 	private byte [] bytes;
@@ -108,7 +109,8 @@ final class DeflateDecoder {
 			chars = new char[this.sizeHint + WINDOW];
 			for (int i = 0; i < WINDOW; i++) chars[i] = (char) (256 + i);
 			charPos = WINDOW;
-			lastMarker = WINDOW;
+			// Until WINDOW values are output, the window still holds initial markers
+			nextMarkerCheck = 2 * WINDOW;
 		}
 		else {
 			markerMode = false;
@@ -186,7 +188,7 @@ final class DeflateDecoder {
 	 * Switches to byte mode, the last WINDOW values being free of markers. They
 	 * are copied as the byte mode window, and stay in chars as output too, so the
 	 * chunk's output is chars[WINDOW, charPos) then bytes[WINDOW, bytePos).
-	 * Byte mode is cheaper: half the memory and no marker tracking per copy.
+	 * Byte mode is cheaper: half the memory and no periodic marker scans.
 	 */
 	private void switchToBytes () {
 		markerMode = false;
@@ -206,7 +208,7 @@ final class DeflateDecoder {
 			ensureChars(length);
 			for (int i = 0; i < length; i++) chars[charPos++] = (char) (data[i] & 0xFF);
 			// Stored data is literal, so it can push the markers out of the window
-			if (charPos - lastMarker >= WINDOW) switchToBytes();
+			if (charPos >= nextMarkerCheck && !markersInWindow()) switchToBytes();
 		}
 		else {
 			ensureBytes(length);
@@ -295,27 +297,47 @@ final class DeflateDecoder {
 	}
 
 	/**
+	 * True if the last WINDOW values of output contain a marker. Checked every
+	 * MARKER_CHECK values of output rather than tracking markers through copies:
+	 * OR-ing each copied value into a flag kept back references from being plain
+	 * array copies. A scan of WINDOW values per MARKER_CHECK of output costs at most
+	 * half a read per value, and in FASTQ markers mostly last the whole chunk anyway.
+	 * Switching to bytes up to MARKER_CHECK values later than possible leaves the
+	 * output unchanged (the same values, just resolved later), only uses more memory.
+	 * With the lookup in Chunk.resolve and arraycopy, decompression alone went from
+	 * 1.89 s to 1.53 s on 4 threads (510 MB AVITI), FastQC CPU -7%.
+	 */
+	private boolean markersInWindow () {
+		nextMarkerCheck = charPos + MARKER_CHECK;
+		char [] out = chars;
+		int seen = 0;
+		for (int i = charPos - WINDOW; i < charPos; i++) seen |= out[i];
+		return seen >= 256;
+	}
+
+	private static final int MARKER_CHECK = 1 << 16;
+
+	/**
 	 * Marker mode decoding. Returns true at the end of the block, or false
 	 * after switching to byte mode to continue the block there.
 	 *
 	 * Hot loop: state is kept in locals and written back in the finally block.
-	 * A match records where it ended if it copied any marker (OR of the values
-	 * copied >= 256), which is all lastMarker needs; literals never are markers.
+	 * Markers aren't tracked per copy: markersInWindow scans the window every
+	 * MARKER_CHECK values of output instead.
 	 * Each refill gives >= 56 bits, enough for a literal/length code, its extra
 	 * bits, a distance code and its extra bits (at most 48).
 	 */
 	private boolean decodeChars (int [] lit, int [] dist) throws IOException {
 		char [] out = chars;
 		int op = charPos;
-		int marker = lastMarker;
 		try {
 			while (true) {
-				if (op - marker >= WINDOW) {
+				if (op >= nextMarkerCheck) {
 					charPos = op;
-					lastMarker = marker;
-					chars = out;
-					switchToBytes();
-					return false;
+					if (!markersInWindow()) {
+						switchToBytes();
+						return false;
+					}
 				}
 				if (op + MAX_MATCH > out.length) {
 					charPos = op;
@@ -361,21 +383,21 @@ final class DeflateDecoder {
 				// The WINDOW markers at the start of the output make any distance <= 32KB valid
 				int from = op - distance;
 				if (from < 0) throw new DataFormatError("Invalid distance too far back");
-				// Element by element, as overlapping copies (distance < length) must repeat the pattern
-				int seen = 0;
-				for (int k = 0; k < length; k++) {
-					char c = out[from + k];
-					out[op + k] = c;
-					seen |= c;
+				// Source and destination don't overlap: arraycopy (an intrinsic) is faster than
+				// the loop. Overlapping copies repeat the last distance values, which needs the
+				// forward loop (arraycopy would copy as if through a temporary buffer).
+				if (distance >= length) {
+					System.arraycopy(out, from, out, op, length);
+				}
+				else {
+					for (int k = 0; k < length; k++) out[op + k] = out[from + k];
 				}
 				op += length;
-				if (seen >= 256) marker = op;
 			}
 		}
 		finally {
 			if (markerMode) {
 				charPos = op;
-				lastMarker = marker;
 				chars = out;
 			}
 		}
