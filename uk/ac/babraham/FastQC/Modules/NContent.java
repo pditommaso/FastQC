@@ -87,8 +87,8 @@ public class NContent extends AbstractQCModule {
 		
 	public void processSequence(Sequence sequence) {
 		calculated = false;
-		String seq = sequence.getSequence();
-		int seqLen = seq.length();
+		byte [] seq = sequence.getSequenceBytes();
+		int seqLen = seq.length;
 		if (nCounts.length < seqLen) {
 			// We need to expand the size of the data structures
 			
@@ -104,13 +104,13 @@ public class NContent extends AbstractQCModule {
 			notNCounts = notNCountsNew;
 		}
 		
+		// Without a branch, like the other per-base loops: a straight loop over
+		// the bytes, with the arrays in locals rather than reloaded fields
+		long [] n = nCounts, notN = notNCounts;
 		for (int i=0;i<seqLen;i++) {
-			if (seq.charAt(i) == 'N') {
-				++nCounts[i];
-			}
-			else {
-				++notNCounts[i];
-			}
+			int isN = seq[i] == 'N' ? 1 : 0;
+			n[i] += isN;
+			notN[i] += 1 - isN;
 		}
 		
 	}
