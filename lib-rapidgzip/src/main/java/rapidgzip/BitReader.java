@@ -21,8 +21,12 @@ final class BitReader {
 
 	/** Random access to the compressed bytes. */
 	interface Source {
-		/** Reads up to {@code length} bytes at {@code offset}, fewer only at the end of the data. */
-		byte [] read (long offset, int length) throws IOException;
+		/**
+		 * Reads up to {@code length} bytes at {@code offset} into dest, fewer only at the end
+		 * of the data, and returns how many. Filling the caller's buffer rather than returning
+		 * a new array lets readers reuse one buffer for all their reads.
+		 */
+		int read (long offset, byte [] dest, int destOffset, int length) throws IOException;
 	}
 
 	private static final VarHandle LONG_LE = MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.LITTLE_ENDIAN);
@@ -74,9 +78,10 @@ final class BitReader {
 			pos = (int) (byteOffset - base);
 		}
 		else {
+			// The buffer is reused for every seek and segment of this reader
+			if (data.length < segmentSize) data = new byte[segmentSize];
 			base = byteOffset;
-			data = source.read(byteOffset, segmentSize);
-			limit = data.length;
+			limit = source.read(byteOffset, data, 0, segmentSize);
 			pos = 0;
 			endOfData = limit < segmentSize;
 		}
@@ -119,20 +124,25 @@ final class BitReader {
 		}
 	}
 
-	// Appends the next segment to the unread bytes (earlier bytes are dropped)
+	/**
+	 * Reads the next segment into the buffer, keeping the unread bytes (earlier bytes are
+	 * dropped): they move to the front of the same array (grown only if needed) instead of
+	 * joining both into a new array each time. The content of data changes in place, so
+	 * callers holding it in locals (DeflateDecoder) must reload data, pos and limit after
+	 * a refill.
+	 */
 	private boolean loadMore () throws IOException {
 		if (endOfData) return false;
-		byte [] more = source.read(base + limit, segmentSize);
-		if (more.length < segmentSize) endOfData = true;
-		if (more.length == 0) return false;
 		int keep = limit - pos;
-		byte [] joined = new byte[keep + more.length];
-		System.arraycopy(data, pos, joined, 0, keep);
-		System.arraycopy(more, 0, joined, keep, more.length);
+		if (data.length < keep + segmentSize) data = java.util.Arrays.copyOf(data, keep + segmentSize);
+		System.arraycopy(data, pos, data, 0, keep);
 		base += pos;
-		data = joined;
-		limit = joined.length;
 		pos = 0;
+		limit = keep;
+		int n = source.read(base + keep, data, keep, segmentSize);
+		if (n < segmentSize) endOfData = true;
+		if (n <= 0) return false;
+		limit += n;
 		return true;
 	}
 

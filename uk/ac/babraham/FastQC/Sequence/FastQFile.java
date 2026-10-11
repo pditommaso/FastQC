@@ -234,9 +234,8 @@ public class FastQFile implements SequenceFile {
 				break;
 			}
 
-			String id = new String(idLine, CHARSET);
-
-			if (!id.startsWith("@")) {
+			// Not empty, as blank lines were skipped above
+			if (idLine[0] != '@') {
 				nextSequence = null;
 				throw new SequenceFormatException("ID line didn't start with '@' at line "+lineNumber);
 			}
@@ -250,10 +249,11 @@ public class FastQFile implements SequenceFile {
 				if (seq == null) throw new IOException("No more data, expected sequence, at line "+lineNumber);
 				++lineNumber;
 				// Then another id which we don't need
-				midLine = br.readLine();
+				midLine = br.readLineUnlessStartsWith('+');
 				if (midLine == null) throw new IOException("No more data, expected midline, at line "+lineNumber);
 				++lineNumber;
-				if (midLine.length == 0 || midLine[0] != '+') {
+				// Skipped (not copied) if it starts with '+'; anything else, empty included, is an error
+				if (midLine != ByteLineReader.SKIPPED) {
 					throw new SequenceFormatException("Midline '"+new String(midLine, CHARSET)+"' didn't start with '+' at "+lineNumber);
 				}
 				// Then the quality string
@@ -275,11 +275,13 @@ public class FastQFile implements SequenceFile {
 
 			if (isColorspace()) {
 				String seqString = new String(seq, CHARSET);
-				nextSequence = new Sequence(this,convertColorspaceToBases(seqString.toUpperCase()), seqString.toUpperCase(), new String(quality, CHARSET), id);
+				nextSequence = new Sequence(this,convertColorspaceToBases(seqString.toUpperCase()), seqString.toUpperCase(), new String(quality, CHARSET), new String(idLine, CHARSET));
 			} 
 			else {
-				// The lines are fresh copies, so they can be upper cased in place and handed over
-				nextSequence = new Sequence(this, toUpperCase(seq), quality, id);
+				// The lines are fresh copies, so they can be upper cased in place and handed over.
+				// The id stays bytes until needed (sampled reads of the per tile module,
+				// casava mode), saving a String per read
+				nextSequence = new Sequence(this, toUpperCase(seq), quality, idLine);
 			}
 
 			// If we're running in --casava mode then we will flag any sequences which
@@ -288,7 +290,7 @@ public class FastQFile implements SequenceFile {
 
 				// This is the test illumina suggest, but it's a bit flakey, and I'm not
 				// sure it's not going to catch things it shouldn't.
-				if (id.indexOf(":Y:") > 0) {
+				if (nextSequence.getID().indexOf(":Y:") > 0) {
 					nextSequence.setIsFiltered(true);
 				}
 			}

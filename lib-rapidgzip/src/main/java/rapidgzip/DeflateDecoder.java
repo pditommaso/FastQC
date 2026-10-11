@@ -101,6 +101,11 @@ final class DeflateDecoder {
 	private int sizeHint;
 
 	private final byte [] codeLengths = new byte[320];
+	// Tables of dynamic blocks, reused from block to block instead of allocated for each:
+	// a block's table isn't used any more once the next block's header is read. The
+	// static fixed tables are never passed for reuse.
+	private int [] litTable;
+	private int [] distTable;
 	private final byte [] precodeLengths = new byte[19];
 
 	DeflateDecoder (BitReader in, Buffers buffers) {
@@ -287,9 +292,9 @@ final class DeflateDecoder {
 		}
 		if (codeLengths[256] == 0) throw new DataFormatError("Invalid code -- missing end-of-block");
 
-		int [] lit = Huffman.build(codeLengths, 0, literals, LIT_BITS, INVALID_LIT, false);
-		int [] dist = Huffman.build(codeLengths, literals, distances, DIST_BITS, INVALID_DIST, true);
-		huffmanBlock(lit, dist);
+		litTable = Huffman.build(codeLengths, 0, literals, LIT_BITS, INVALID_LIT, false, litTable);
+		distTable = Huffman.build(codeLengths, literals, distances, DIST_BITS, INVALID_DIST, true, distTable);
+		huffmanBlock(litTable, distTable);
 	}
 
 	private static boolean hasSingleCode (byte [] lengths) {

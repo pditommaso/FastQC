@@ -19,6 +19,7 @@
  */
 package uk.ac.babraham.FastQC.Sequence;
 
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -36,13 +37,16 @@ public class Sequence {
 	// The strings this was created from, if it was
 	private final String sequence;
 	private final String quality;
-	private final String id;
+	// The id, or its bytes decoded when first needed (Strings are safe to share without locking)
+	private String id;
+	private final byte [] idBytes;
 	private SequenceFile file;
 	private String colorspace;
 	private boolean isFiltered;
 	
 	public Sequence (SequenceFile file,String sequence, String quality, String id) {
 		this.id = id;
+		this.idBytes = null;
 		this.file = file;
 		this.sequence = sequence.toUpperCase();
 		this.quality = quality;
@@ -54,6 +58,7 @@ public class Sequence {
 	
 	public Sequence (SequenceFile file,String sequence, String colorspace, String quality, String id) {
 		this.id = id;
+		this.idBytes = null;
 		this.file = file;
 		this.sequence = sequence;
 		this.quality = quality;
@@ -64,10 +69,12 @@ public class Sequence {
 
 	/**
 	 * Creates a sequence from bytes, one per position, which it then owns.
-	 * Bases must already be upper case.
+	 * Bases must already be upper case. The id is decoded with the platform
+	 * charset when needed.
 	 */
-	public Sequence (SequenceFile file, byte [] bases, byte [] qualities, String id) {
-		this.id = id;
+	public Sequence (SequenceFile file, byte [] bases, byte [] qualities, byte [] id) {
+		this.id = null;
+		this.idBytes = id;
 		this.file = file;
 		this.bases = bases;
 		this.qualities = qualities;
@@ -112,6 +119,14 @@ public class Sequence {
 	public String getSequence () {
 		return sequence != null ? sequence : new String(bases, StandardCharsets.ISO_8859_1);
 	}
+
+	/**
+	 * The first length bases, like getSequence().substring(0, length), without
+	 * making a String of the whole sequence first.
+	 */
+	public String getSequence (int length) {
+		return sequence != null ? sequence.substring(0, length) : new String(bases, 0, length, StandardCharsets.ISO_8859_1);
+	}
 	
 	public String getColorspace () {
 		return colorspace;
@@ -121,8 +136,18 @@ public class Sequence {
 		return quality != null ? quality : new String(qualities, StandardCharsets.ISO_8859_1);
 	}
 	
+	/**
+	 * The id, decoded from its bytes on first use with the charset FastQFile used to
+	 * decode it before (the platform default). Not synchronized: Strings are immutable,
+	 * so racing threads at worst both decode it and see equal values.
+	 */
 	public String getID () {
-		return id;
+		String s = id;
+		if (s == null) {
+			s = new String(idBytes, Charset.defaultCharset());
+			id = s;
+		}
+		return s;
 	}
 	
 }
