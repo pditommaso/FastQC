@@ -30,7 +30,10 @@ public class QualityCount {
 	 * Phred 86 with a 64 offset, which should be plenty.
 	 */
 	
-	private long [] actualCounts = new long[150];
+	/** Quality characters must be below this. */
+	public static final int MAX_CHAR = 150;
+
+	private long [] actualCounts = new long[MAX_CHAR];
 	
 	private long totalCounts = 0;
 
@@ -41,6 +44,15 @@ public class QualityCount {
 			throw new IllegalArgumentException("Got character "+c+" as a quality value which has ASCII"+((int)c)+" which is higher than we can cope with");
 		}
 		actualCounts[(int)c]++;
+	}
+	
+	/**
+	 * Adds count occurrences of c, which must be below MAX_CHAR (not checked:
+	 * callers count into flat tables first and check characters there).
+	 */
+	public void addValue(char c, long count) {
+		totalCounts += count;
+		actualCounts[c] += count;
 	}
 	
 	public long getTotalCount () {
