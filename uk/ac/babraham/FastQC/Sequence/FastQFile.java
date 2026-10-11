@@ -31,7 +31,9 @@ import java.util.regex.Pattern;
 
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream;
 
+import rapidgzip.RapidGzipInputStream;
 import uk.ac.babraham.FastQC.FastQCConfig;
+import uk.ac.babraham.FastQC.Analysis.AnalysisQueue;
 import uk.ac.babraham.FastQC.Utilities.MultiMemberGZIPInputStream;
 import uk.ac.babraham.FastQC.Utilities.ThreadedInputStream;
 
@@ -53,6 +55,10 @@ public class FastQFile implements SequenceFile {
 	// the file we've got.  We don't read from this directly, but it's the
 	// only way to access the file pointer.
 	private FileInputStream fis;
+	// Set when a gzip file is decompressed in parallel. fis is then never read
+	// (RapidGzipInputStream opens its own channel), so progress comes from how
+	// far decompression got through the compressed file instead.
+	private RapidGzipInputStream gzipStream = null;
 
 	private String name;
 	private boolean isColorspace = false;
@@ -82,9 +88,29 @@ public class FastQFile implements SequenceFile {
 			br = new BufferedReader(new InputStreamReader(System.in));
 		}
 		else if (file.getName().toLowerCase().endsWith(".gz") || (Files.probeContentType(file.toPath()) != null && (Files.probeContentType(file.toPath()).equals("application/x-gzip") || Files.probeContentType(file.toPath()).equals("application/gzip")))) {
-			// 64 KB input buffer: the 512 byte default means one native read of
-			// the file per 512 compressed bytes (wall -2% on 2M AVITI reads).
-			br = new BufferedReader(new InputStreamReader(decompressor(config, new MultiMemberGZIPInputStream(fis, 64 * 1024))));
+			// RapidGzipInputStream splits the compressed file into chunks and decodes
+			// them speculatively on a thread pool, which needs random access to the
+			// file and spare cores. Decompression was the reader's bottleneck: wall
+			// -5% on AVITI 2M reads, and it lets more processor threads pay off.
+			// The sequential paths use a 64 KB input buffer: the 512 byte default means
+			// one native read per 512 compressed bytes (wall -2% on 2M AVITI reads).
+			if (!Files.isRegularFile(file.toPath())) {
+				// Eg a named pipe (process substitution), which can only be read sequentially
+				br = new BufferedReader(new InputStreamReader(decompressor(config, new MultiMemberGZIPInputStream(fis, 64 * 1024))));
+			}
+			else if (config.threads != null && config.threads <= 1) {
+				// Single-threaded as requested: decompress inline on the reading thread
+				br = new BufferedReader(new InputStreamReader(new MultiMemberGZIPInputStream(fis, 64 * 1024)));
+			}
+			else {
+				// Decompress on several threads; the decoded output is still read in
+				// order, so the sequences and the report are identical. It reads the
+				// file itself, so fis isn't needed (and can't leak if this throws).
+				fis.close();
+				fis = null;
+				gzipStream = new RapidGzipInputStream(file.toPath(), gzipThreads(config));
+				br = new BufferedReader(new InputStreamReader(gzipStream));
+			}
 		} 
 		else if (file.getName().toLowerCase().endsWith(".bz2")) {
 			br = new BufferedReader(new InputStreamReader(decompressor(config, new BZip2CompressorInputStream(fis,true))));
@@ -94,6 +120,19 @@ public class FastQFile implements SequenceFile {
 			br = new BufferedReader(new InputStreamReader(fis));
 		}
 		readNext();
+	}
+
+	/**
+	 * Threads to decompress a gzip file with: half of this file's share of the
+	 * thread budget if one was given (-t is shared by the files processed in
+	 * parallel), else 4, as beyond that decompression is no longer the bottleneck
+	 * (decompressing AVITI alone: 3.6 s with GZIPInputStream, 1.9 s with 4 threads,
+	 * 1.4 s with 8 for more CPU). These threads come on top of the per-file
+	 * reader and processor threads sized by AnalysisQueue.
+	 */
+	private static int gzipThreads(FastQCConfig config) {
+		if (config.threads != null) return Math.max(1, config.threads / AnalysisQueue.getInstance().getFilesInParallel() / 2);
+		return 4;
 	}
 
 	/**
@@ -117,6 +156,10 @@ public class FastQFile implements SequenceFile {
 		if (! hasNext()) return 100;
 		if (file.getName().startsWith("stdin")) {
 			return 0;
+		}
+		if (gzipStream != null) {
+			// Backed by a volatile field the consumer advances, so a cheap, safe poll
+			return (int) (((double)gzipStream.compressedPosition()/ fileSize)*100);
 		}
 		try {
 			int percent = (int) (((double)fis.getChannel().position()/ fileSize)*100);
