@@ -33,17 +33,20 @@ final class BitReader {
 	private final Source source;
 	private final int segmentSize;
 
-	private byte [] data = new byte[0];
+	// Package private so that decoding loops can keep the bit buffer in locals.
+	// DeflateDecoder copies bits, count, data, pos and limit into locals and writes
+	// bits, count and pos back before anything else uses the reader (refill, return,
+	// exception); data and limit only change in refill, which it calls on the reader.
+	byte [] data = new byte[0];
 	// File offset of data[0]
 	private long base;
-	private int limit;
-	private int pos;
+	int limit;
+	int pos;
 	private boolean endOfData;
 	// Zero bytes supplied past the end of the data
 	private int padding;
 
-	// Bit buffer, the next bit to read is the lowest. Package private so the decoder's
-	// hot loops can read it directly after a refill.
+	// Bit buffer, the next bit to read is the lowest
 	long bits;
 	int count;
 
